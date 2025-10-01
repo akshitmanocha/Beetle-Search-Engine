@@ -1,0 +1,10 @@
+crawl_date: "2025-09-30"
+author: "Akshit Manocha"
+seed_count: 120
+seed_selection_notes: |
+  Scope: Trusted AI research labs, engineering blogs, independent researchers, safety orgs, and MLOps/tooling vendors with frequent longform posts.
+  Format: One domain per line. Prefer blog subdomains when available; otherwise use root domains (crawler will enforce same-origin and depth limits).
+  Exclusions: Aggregators, generic news, low-signal content farms, most social platforms, and sites disallowing bots in robots.txt.
+  Caveats: Some blogs live under paths (e.g., openai.com/blog, microsoft.com/research/blog). If needed, add a path allowlist in crawl policy to constrain scope.
+  JS: Some sites are JS-rendered; mark such pages for later headless fetches.
+  Politeness: Verify robots.txt and honor crawl-delay per domain before fetching.
