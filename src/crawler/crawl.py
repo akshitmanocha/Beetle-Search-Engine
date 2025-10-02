@@ -18,9 +18,7 @@ import argparse
 import hashlib
 import json
 import os
-import queue
 import time
-import threading
 import logging
 import csv
 import re
@@ -32,23 +30,21 @@ import requests
 from urllib import robotparser
 from bs4 import BeautifulSoup
 from groq import Groq
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 CRAWLER_VERSION = "1.0.0"
-USER_AGENT = "DeepBlogSearch/1.0 (+mailto:your-email@example.com)"
+USER_AGENT = "DeepBlogSearch/1.0 (+mailto:akshitmanocha37@gmail.com)"
 DEFAULT_RATE = 1.5
 DEFAULT_TIMEOUT = 10
 DEFAULT_RETRIES = 2
 DEFAULT_MAX_DEPTH = 2
-DEFAULT_WORKERS = 2
 
 # Initialize Groq client (API key from environment variable)
-GROQ_CLIENT = None
-try:
-    GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-    if GROQ_API_KEY:
-        GROQ_CLIENT = Groq(api_key=GROQ_API_KEY)
-except Exception:
-    pass
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_CLIENT = Groq(api_key=GROQ_API_KEY)
 
 # Trap detection patterns
 TRAP_PATTERNS = [
@@ -169,58 +165,68 @@ def extract_page_content(html: str, url: str, max_words=500):
     }
 
 def calculate_blog_heuristic_score(html: str, url: str, logger=None) -> float:
-    """Score page using LLM (with fallback to heuristics)."""
-    # Extract clean content
-    page_data = extract_page_content(html, url, max_words=500)
+    """Score page using LLM (with fallback on errors)."""
+    try:
+        # Extract clean content
+        page_data = extract_page_content(html, url, max_words=500)
 
-    # Prepare prompt
-    prompt = f"""Analyze this webpage and determine if it's a high-quality AI/ML blog post or technical article.
-                URL: {page_data['url']}
-                Title: {page_data['title']}
-                Content preview: {page_data['content'][:1500]}
+        # Prepare prompt
+        prompt = f"""Analyze this webpage and determine if it's a high-quality AI/ML blog post or technical article.
+                    URL: {page_data['url']}
+                    Title: {page_data['title']}
+                    Content preview: {page_data['content'][:1500]}
 
-                Score this page from 0-100 based on:
-                - Educational/technical content about AI, ML, deep learning
-                - Long-form blog post or article (not just news snippets)
-                - Contains explanations, code examples, or research insights
-                - Written by researchers, engineers, or technical authors
+                    Score this page from 0-100 based on:
+                    - Educational/technical content about AI, ML, deep learning
+                    - Long-form blog post or article (not just news snippets)
+                    - Contains explanations, code examples, or research insights
+                    - Written by researchers, engineers, or technical authors
 
-                Return ONLY a JSON object with this exact format:
-                {{"score": <number 0-100>, "reasoning": "<brief 1-sentence explanation>"}}"""
+                    YOU MUST Return ONLY a JSON object with this exact format:
+                    {{"score": <number 0-100>, "reasoning": "<brief 1-sentence explanation>"}}"""
 
-    # Call Groq API
-    response = GROQ_CLIENT.chat.completions.create(
-        model="openai/gpt-oss-20b",
-        messages=[
-            {
-                "role": "system",
-                "content": "You are an expert at identifying high-quality AI/ML technical blog posts and articles. Return only valid JSON."
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        temperature=0.3,
-        max_tokens=150,
-    )
+        # Call Groq API
+        response = GROQ_CLIENT.chat.completions.create(
+            model="moonshotai/kimi-k2-instruct-0905",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are an expert at identifying high-quality AI/ML technical blog posts and articles. Return only valid JSON."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.3,
+            max_tokens=150,
+        )
 
-    # Parse response
-    result_text = response.choices[0].message.content.strip()
+        # Parse response
+        result_text = response.choices[0].message.content.strip()
 
-    # Extract JSON (handle markdown code blocks)
-    if "```json" in result_text:
-        result_text = result_text.split("```json")[1].split("```")[0].strip()
-    elif "```" in result_text:
-        result_text = result_text.split("```")[1].split("```")[0].strip()
+        # Extract JSON (handle markdown code blocks)
+        if "```json" in result_text:
+            result_text = result_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in result_text:
+            result_text = result_text.split("```")[1].split("```")[0].strip()
 
-    result = json.loads(result_text)
-    score = float(result.get("score", 0))
+        result = json.loads(result_text)
+        score = float(result.get("score", 0))
 
-    if logger:
-        logger.debug(f"LLM score for {url}: {score} - {result.get('reasoning', '')}")
+        if logger:
+            logger.debug(f"LLM score for {url}: {score} - {result.get('reasoning', '')}")
 
-    return min(100.0, max(0.0, score))
+        return min(100.0, max(0.0, score))
+
+    except json.JSONDecodeError as e:
+        if logger:
+            logger.warning(f"LLM returned invalid JSON for {url}: {repr(e)} - using default score 0")
+        return 0.0
+    except Exception as e:
+        if logger:
+            logger.warning(f"LLM scoring failed for {url}: {repr(e)} - using default score 0")
+        return 0.0
 
 def setup_logging(out_dir: str):
     """Setup logging to file and console."""
@@ -430,145 +436,12 @@ def polite_fetch(session: requests.Session, url: str, host_last_access: dict, de
 
     return None, "max-retries-exceeded", None
 
-class CrawlStats:
-    """Thread-safe statistics tracker."""
-    def __init__(self):
-        self.lock = threading.Lock()
-        self.pages_fetched = 0
-        self.pages_saved = 0
-        self.pages_failed = 0
-        self.pages_skipped = 0
-        self.bytes_downloaded = 0
-        self.errors = defaultdict(int)
-        self.domains_contacted = set()
-        self.start_time = time.time()
-
-    def increment(self, metric, value=1):
-        with self.lock:
-            if metric == "fetched":
-                self.pages_fetched += value
-            elif metric == "saved":
-                self.pages_saved += value
-            elif metric == "failed":
-                self.pages_failed += value
-            elif metric == "skipped":
-                self.pages_skipped += value
-            elif metric == "bytes":
-                self.bytes_downloaded += value
-
-    def add_error(self, error_type):
-        with self.lock:
-            self.errors[error_type] += 1
-
-    def add_domain(self, domain):
-        with self.lock:
-            self.domains_contacted.add(domain)
-
-    def get_summary(self):
-        with self.lock:
-            elapsed = time.time() - self.start_time
-            return {
-                "pages_fetched": self.pages_fetched,
-                "pages_saved": self.pages_saved,
-                "pages_failed": self.pages_failed,
-                "pages_skipped": self.pages_skipped,
-                "bytes_downloaded": self.bytes_downloaded,
-                "domains_contacted": len(self.domains_contacted),
-                "errors": dict(self.errors),
-                "elapsed_seconds": elapsed,
-                "pages_per_second": self.pages_fetched / elapsed if elapsed > 0 else 0,
-            }
-
-def worker_crawl(worker_id, url_queue, seen_lock, seen_set, host_last_access,
-                 rp_map, out_dir, rate, timeout, retries, max_depth, stats, seen_urls, logger, stop_event):
-    """Worker thread for concurrent crawling."""
-    session = requests.Session()
-    session.headers.update({"User-Agent": USER_AGENT})
-
-    logger.info(f"Worker {worker_id} started")
-
-    while not stop_event.is_set():
-        try:
-            url, depth, seed, seed_id, referer = url_queue.get(timeout=1)
-        except queue.Empty:
-            continue
-
-        # Check if already seen (URL-based deduplication)
-        with seen_lock:
-            canonical_url = canonicalize_url(url)
-            if canonical_url in seen_set or canonical_url in seen_urls:
-                stats.increment("skipped")
-                url_queue.task_done()
-                continue
-            seen_set.add(canonical_url)
-            seen_urls.add(canonical_url)
-
-        # Check for traps
-        if is_potential_trap(canonical_url):
-            logger.debug(f"Skipping potential trap: {canonical_url}")
-            stats.increment("skipped")
-            stats.add_error("potential-trap")
-            url_queue.task_done()
-            continue
-
-        # Fetch the page
-        resp, err, _ = polite_fetch(session, url, host_last_access, rate, timeout,
-                                     retries, rp_map, logger)
-
-        parsed = urlparse(url)
-        stats.add_domain(parsed.netloc)
-
-        if err:
-            stats.increment("failed")
-            stats.add_error(err)
-            logger.debug(f"Failed to fetch {url}: {err}")
-            url_queue.task_done()
-            continue
-
-        if resp is None:
-            stats.increment("failed")
-            stats.add_error("no-response")
-            url_queue.task_done()
-            continue
-
-        stats.increment("fetched")
-
-        # Only save HTML
-        ctype = resp.headers.get("Content-Type", "")
-        if resp.status_code == 200 and "html" in ctype.lower():
-            html = resp.text
-            stats.increment("bytes", len(html))
-
-            try:
-                save_page(out_dir, url, html, resp, seed, canonical_url,
-                          referer, seed_id, logger)
-                stats.increment("saved")
-
-                # Enqueue same-origin links if depth < max_depth
-                if depth < max_depth:
-                    links = extract_same_origin_links(url, html)
-                    for link in links:
-                        url_queue.put((link, depth + 1, seed, seed_id, url))
-
-            except Exception as e:
-                logger.error(f"Error saving page {url}: {repr(e)}")
-                stats.increment("failed")
-                stats.add_error("save-error")
-        else:
-            stats.increment("skipped")
-            if resp.status_code != 200:
-                stats.add_error(f"status-{resp.status_code}")
-
-        url_queue.task_done()
-
-    logger.info(f"Worker {worker_id} stopped")
-
-def crawl(seeds, out_dir, limit, rate, timeout, retries, max_depth, workers):
-    """Main crawl orchestration with concurrent workers."""
+def crawl(seeds, out_dir, limit, rate, timeout, retries, max_depth):
+    """Single-threaded crawl with BFS."""
     safe_makedirs(out_dir)
     logger = setup_logging(out_dir)
 
-    logger.info(f"Starting crawl with {workers} workers, max depth {max_depth}, limit {limit}")
+    logger.info(f"Starting crawl, max depth {max_depth}, limit {limit}")
     logger.info(f"Seeds: {len(seeds)}")
 
     # Setup
@@ -588,63 +461,112 @@ def crawl(seeds, out_dir, limit, rate, timeout, retries, max_depth, workers):
                 rate = max(rate, float(cd))
                 logger.info(f"Using crawl-delay {cd}s for {host}")
 
-    # Shared state
-    url_queue = queue.Queue()
-    seen_set = set()
-    seen_lock = threading.Lock()
-    host_last_access = defaultdict(float)
+    # Simple state
+    url_queue = []
     seen_urls = load_seen_urls(out_dir)
-    stats = CrawlStats()
-    stop_event = threading.Event()
+    host_last_access = defaultdict(float)
 
-    # Seed the queue
+    # Stats
+    start_time = time.time()
+    pages_fetched = 0
+    pages_saved = 0
+    pages_failed = 0
+    pages_skipped = 0
+    bytes_downloaded = 0
+    errors = defaultdict(int)
+    domains_contacted = set()
+
+    # Seed the queue: (url, depth, seed, seed_id, referer)
     for idx, s in enumerate(seeds):
-        url_queue.put((s, 0, s, idx, None))
+        url_queue.append((s, 0, s, idx, None))
 
-    # Start workers
-    threads = []
-    for i in range(workers):
-        t = threading.Thread(
-            target=worker_crawl,
-            args=(i, url_queue, seen_lock, seen_set, host_last_access,
-                  rp_map, out_dir, rate, timeout, retries, max_depth, stats, seen_urls, logger, stop_event),
-            daemon=True
-        )
-        t.start()
-        threads.append(t)
+    # Crawl loop
+    while url_queue and pages_saved < limit:
+        url, depth, seed, seed_id, referer = url_queue.pop(0)
 
-    # Monitor progress
-    try:
-        while stats.pages_saved < limit:
-            time.sleep(5)
-            summary = stats.get_summary()
-            logger.info(f"Progress: {summary['pages_saved']} saved, {summary['pages_fetched']} fetched, "
-                        f"{summary['pages_failed']} failed, {summary['domains_contacted']} domains")
+        # Check if already seen
+        canonical_url = canonicalize_url(url)
+        if canonical_url in seen_urls:
+            pages_skipped += 1
+            continue
+        seen_urls.add(canonical_url)
 
-            if url_queue.empty() and url_queue.unfinished_tasks == 0:
-                logger.info("Queue empty, crawl complete")
-                break
+        # Check for traps
+        if is_potential_trap(canonical_url):
+            logger.debug(f"Skipping potential trap: {canonical_url}")
+            pages_skipped += 1
+            errors["potential-trap"] += 1
+            continue
 
-            if stats.pages_saved >= limit:
-                logger.info("Limit reached")
-                break
+        # Fetch the page
+        resp, err, _ = polite_fetch(session, url, host_last_access, rate, timeout,
+                                     retries, rp_map, logger)
 
-    except KeyboardInterrupt:
-        logger.info("Interrupted by user")
+        parsed = urlparse(url)
+        domains_contacted.add(parsed.netloc)
 
-    # Shutdown
-    logger.info("Stopping workers...")
-    stop_event.set()
+        if err:
+            pages_failed += 1
+            errors[err] += 1
+            logger.debug(f"Failed to fetch {url}: {err}")
+            continue
 
-    for t in threads:
-        t.join(timeout=5)
+        if resp is None:
+            pages_failed += 1
+            errors["no-response"] += 1
+            continue
+
+        pages_fetched += 1
+
+        # Only save HTML
+        ctype = resp.headers.get("Content-Type", "")
+        if resp.status_code == 200 and "html" in ctype.lower():
+            html = resp.text
+            bytes_downloaded += len(html)
+
+            try:
+                save_page(out_dir, url, html, resp, seed, canonical_url,
+                          referer, seed_id, logger)
+                pages_saved += 1
+
+                # Enqueue same-origin links if depth < max_depth
+                if depth < max_depth:
+                    links = extract_same_origin_links(url, html)
+                    for link in links:
+                        url_queue.append((link, depth + 1, seed, seed_id, url))
+
+                # Log progress every 10 pages
+                if pages_saved % 10 == 0:
+                    logger.info(f"Progress: {pages_saved} saved, {pages_fetched} fetched, "
+                                f"{pages_failed} failed, {len(domains_contacted)} domains")
+
+            except Exception as e:
+                logger.error(f"Error saving page {url}: {repr(e)}")
+                pages_failed += 1
+                errors["save-error"] += 1
+        else:
+            pages_skipped += 1
+            if resp.status_code != 200:
+                errors[f"status-{resp.status_code}"] += 1
 
     # Save seen URLs for next crawl
     save_seen_urls(out_dir, seen_urls)
 
-    summary = stats.get_summary()
-    logger.info(f"Crawl complete: {summary}")
+    # Build summary
+    elapsed = time.time() - start_time
+    summary = {
+        "pages_fetched": pages_fetched,
+        "pages_saved": pages_saved,
+        "pages_failed": pages_failed,
+        "pages_skipped": pages_skipped,
+        "bytes_downloaded": bytes_downloaded,
+        "domains_contacted": len(domains_contacted),
+        "errors": dict(errors),
+        "elapsed_seconds": elapsed,
+        "pages_per_second": pages_fetched / elapsed if elapsed > 0 else 0,
+    }
 
+    logger.info(f"Crawl complete: {summary}")
     return summary
 
 def generate_crawl_manifest(out_dir, summary, args):
@@ -658,7 +580,6 @@ def generate_crawl_manifest(out_dir, summary, args):
         "timeout": args.timeout,
         "retries": args.retries,
         "max_depth": args.max_depth,
-        "workers": args.workers,
         "summary": summary,
     }
 
@@ -747,7 +668,6 @@ def main():
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="Request timeout seconds")
     parser.add_argument("--retries", type=int, default=DEFAULT_RETRIES, help="Retries on transient errors")
     parser.add_argument("--max-depth", type=int, default=DEFAULT_MAX_DEPTH, help="Max same-origin link depth")
-    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS, help="Number of concurrent workers")
     parser.add_argument("--export-candidates", action="store_true", help="Export candidate pages for labeling")
     parser.add_argument("--min-score", type=int, default=40, help="Minimum heuristic score for candidates")
     args = parser.parse_args()
@@ -759,7 +679,7 @@ def main():
 
     print(f"Starting crawl with {len(seeds)} seeds...")
     summary = crawl(seeds, args.out, args.limit, args.rate, args.timeout, args.retries,
-                    args.max_depth, args.workers)
+                    args.max_depth)
 
     # Generate manifest and report
     manifest_path = generate_crawl_manifest(args.out, summary, args)

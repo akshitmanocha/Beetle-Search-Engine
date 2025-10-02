@@ -1,6 +1,6 @@
 openai.com/blog
-deepmind.google
-anthropic.com
+deepmind.google/discover/blog/
+anthropic.com/news
 huggingface.co/blog
 stability.ai/blog
 allenai.org
@@ -10,7 +10,6 @@ lilianweng.github.io
 thegradient.pub
 distill.pub
 lesswrong.com
-arxiv.org
 towardsdatascience.com
 machinelearningmastery.com
 paperswithcode.com/blog
