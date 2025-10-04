@@ -1,708 +1,147 @@
 #!/usr/bin/env python3
-"""
-Polite seed crawler with comprehensive features for search engine building.
-
-Features:
-- robots.txt check per domain with crawl-delay respect
-- URL canonicalization and deduplication
-- concurrent workers with configurable parallelism
-- content hashing for duplicate detection
-- version snapshots for changed pages
-- blog-like content heuristics and scoring
-- JS detection and trap avoidance
-- comprehensive logging and crawl manifest
-- post-crawl reporting and candidate export
-"""
-
 import argparse
 import hashlib
 import json
 import os
-import time
-import logging
-import csv
-import re
-from collections import defaultdict
 from datetime import datetime, timezone
-from urllib.parse import urlparse, urljoin, urldefrag, parse_qs, urlencode
-from pathlib import Path
+from urllib.parse import urlparse
 import requests
-from urllib import robotparser
 from bs4 import BeautifulSoup
 from groq import Groq
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
 load_dotenv()
+GROQ_CLIENT = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-CRAWLER_VERSION = "1.0.0"
-USER_AGENT = "DeepBlogSearch/1.0 (+mailto:akshitmanocha37@gmail.com)"
-DEFAULT_RATE = 1.5
-DEFAULT_TIMEOUT = 10
-DEFAULT_RETRIES = 2
-DEFAULT_MAX_DEPTH = 2
-
-# Initialize Groq client (API key from environment variable)
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_CLIENT = Groq(api_key=GROQ_API_KEY)
-
-# Trap detection patterns
-TRAP_PATTERNS = [
-    r'/\d{4}/\d{2}/\d{2}/',  # date-based URLs
-    r'/page/\d+',             # pagination
-    r'/tag/',                 # tag pages
-    r'/category/',            # category pages
-    r'/author/',              # author archives
-    r'\?page=\d+',            # query pagination
-]
-
-def canonicalize_url(url: str) -> str:
-    """Normalize URL for deduplication."""
+def canonicalize_url(url):
     parsed = urlparse(url)
+    path = parsed.path.rstrip('/') if parsed.path != '/' else '/'
+    return f"{parsed.scheme}://{parsed.netloc}{path}"
 
-    # Normalize scheme to https
-    scheme = parsed.scheme.lower()
-    if scheme not in ('http', 'https'):
-        return url
+def sha_name(url):
+    return hashlib.sha256(url.encode("utf-8")).hexdigest()
 
-    # Normalize netloc (lowercase)
-    netloc = parsed.netloc.lower()
-
-    # Normalize path (remove trailing slash except for root)
-    path = parsed.path
-    if path != '/' and path.endswith('/'):
-        path = path.rstrip('/')
-    if not path:
-        path = '/'
-
-    # Sort query parameters for consistency
-    query_params = parse_qs(parsed.query, keep_blank_values=True)
-    sorted_query = urlencode(sorted(query_params.items()), doseq=True)
-
-    # Remove fragment
-    canonical = f"{scheme}://{netloc}{path}"
-    if sorted_query:
-        canonical += f"?{sorted_query}"
-
-    return canonical
-
-def sha_name(url: str) -> str:
-    h = hashlib.sha256(url.encode("utf-8")).hexdigest()
-    return h
-
-def safe_makedirs(path: str):
-    os.makedirs(path, exist_ok=True)
-
-def is_potential_trap(url: str) -> bool:
-    """Detect URLs that might be infinite traps."""
-    for pattern in TRAP_PATTERNS:
-        if re.search(pattern, url):
-            return True
-    return False
-
-def detect_js_requirement(html: str, url: str) -> bool:
-    """Heuristically detect if page requires JS rendering."""
-    if not html or len(html) < 500:
-        return True
-
+def extract_title(html):
     soup = BeautifulSoup(html, "html.parser")
-
-    # Check for common SPA frameworks
-    js_indicators = [
-        soup.find(id="root"),
-        soup.find(id="app"),
-        soup.find("div", {"data-reactroot": True}),
-        soup.find("div", {"ng-app": True}),
-    ]
-
-    if any(js_indicators):
-        # Check if there's actual content
-        text = soup.get_text(strip=True)
-        if len(text) < 200:
-            return True
-
-    return False
-
-def extract_page_content(html: str, url: str, max_words=500):
-    """Extract clean content from HTML for LLM analysis."""
-    if not html:
-        return {"title": "", "content": "", "url": url}
-
-    soup = BeautifulSoup(html, "html.parser")
-
-    # Extract title
-    title = ""
     title_tag = soup.find("title")
     if title_tag:
-        title = title_tag.get_text(strip=True)
+        return title_tag.get_text(strip=True)
+    h1 = soup.find("h1")
+    return h1.get_text(strip=True) if h1 else ""
 
-    # Try to get h1 if no title
-    if not title:
-        h1 = soup.find("h1")
-        if h1:
-            title = h1.get_text(strip=True)
-
-    # Remove script, style, nav, footer, header
-    for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
-        tag.decompose()
-
-    # Get main content (prefer article, main, or body)
-    main_content = soup.find("article") or soup.find("main") or soup.find("body")
-
-    if main_content:
-        text = main_content.get_text(separator=" ", strip=True)
-    else:
-        text = soup.get_text(separator=" ", strip=True)
-
-    # Clean and limit words
-    words = text.split()[:max_words]
-    content = " ".join(words)
-
-    return {
-        "title": title[:200],
-        "content": content,
-        "url": url
-    }
-
-def calculate_blog_heuristic_score(html: str, url: str, logger=None) -> float:
-    """Score page using LLM (with fallback on errors)."""
+def calculate_score(html, url, title):
+    """Use Groq LLM to score page quality"""
     try:
-        # Extract clean content
-        page_data = extract_page_content(html, url, max_words=500)
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup(["script", "style", "nav", "footer", "header"]):
+            tag.decompose()
+        text = soup.get_text(separator=" ", strip=True)
+        content = " ".join(text.split()[:500])
 
-        # Prepare prompt
-        prompt = f"""Analyze this webpage and determine if it's a high-quality AI/ML blog post or technical article.
-                    URL: {page_data['url']}
-                    Title: {page_data['title']}
-                    Content preview: {page_data['content'][:1500]}
+        prompt = f"""Analyze if this is a high-quality AI/ML blog post or technical article or a research.
+URL: {url}
+Title: {title}
+Content: {content}
 
-                    Score this page from 0-100 based on:
-                    - Educational/technical content about AI, ML, deep learning
-                    - Long-form blog post or article (not just news snippets)
-                    - Contains explanations, code examples, or research insights
-                    - Written by researchers, engineers, or technical authors
+Score 0-100 based on:
+- Educational AI/ML/deep learning content
+- Long-form blog post or article
+- Explanations, code examples, or research insights
 
-                    YOU MUST Return ONLY a JSON object with this exact format:
-                    {{"score": <number 0-100>, "reasoning": "<brief 1-sentence explanation>"}}"""
+Return ONLY JSON: {{"score": <number>, "reasoning": "<1 sentence>"}}"""
 
-        # Call Groq API
         response = GROQ_CLIENT.chat.completions.create(
             model="moonshotai/kimi-k2-instruct-0905",
             messages=[
-                {
-                    "role": "system",
-                    "content": "You are an expert at identifying high-quality AI/ML technical blog posts and articles. Return only valid JSON."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
+                {"role": "system", "content": "You are an expert at identifying high-quality AI/ML technical content. Return only valid JSON."},
+                {"role": "user", "content": prompt}
             ],
             temperature=0.3,
-            max_tokens=150,
+            max_tokens=150
         )
 
-        # Parse response
         result_text = response.choices[0].message.content.strip()
-
-        # Extract JSON (handle markdown code blocks)
         if "```json" in result_text:
             result_text = result_text.split("```json")[1].split("```")[0].strip()
         elif "```" in result_text:
             result_text = result_text.split("```")[1].split("```")[0].strip()
 
         result = json.loads(result_text)
-        score = float(result.get("score", 0))
-
-        if logger:
-            logger.debug(f"LLM score for {url}: {score} - {result.get('reasoning', '')}")
-
-        return min(100.0, max(0.0, score))
-
-    except json.JSONDecodeError as e:
-        if logger:
-            logger.warning(f"LLM returned invalid JSON for {url}: {repr(e)} - using default score 0")
-        return 0.0
-    except Exception as e:
-        if logger:
-            logger.warning(f"LLM scoring failed for {url}: {repr(e)} - using default score 0")
+        return min(100.0, max(0.0, float(result.get("score", 0))))
+    except:
+        print(f"Failed to score: {url}")
         return 0.0
 
-def setup_logging(out_dir: str):
-    """Setup logging to file and console."""
-    log_dir = os.path.join(out_dir, "logs")
-    safe_makedirs(log_dir)
+def save_page(url, html, final_url, title, score):
+    canonical = canonicalize_url(url)
+    sha = sha_name(canonical)
 
-    log_file = os.path.join(log_dir, f"crawl_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.log")
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_file),
-            logging.StreamHandler()
-        ]
-    )
-
-    return logging.getLogger(__name__)
-
-def read_seeds(path: str) -> list:
-    with open(path, "r", encoding="utf-8") as f:
-        lines = [l.strip() for l in f if l.strip() and not l.strip().startswith("#")]
-
-    seeds = []
-    for u in lines:
-        if not u.startswith("http://") and not u.startswith("https://"):
-            u = "https://" + u
-        seeds.append(u)
-    
-    return seeds
-
-def fetch_robots(session: requests.Session, base_url: str):
-    parsed = urlparse(base_url)
-    robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
-    rp = robotparser.RobotFileParser()
-    try:
-        resp = session.get(robots_url, timeout=DEFAULT_TIMEOUT, headers={"User-Agent": USER_AGENT})
-        if resp.status_code == 200:
-            rp.parse(resp.text.splitlines())
-        else:
-            rp = None
-    except Exception:
-        rp = None
-    return rp
-
-def get_crawl_delay(rp: robotparser.RobotFileParser):
-    if not rp:
-        return None
-    try:
-        return rp.crawl_delay(USER_AGENT)
-    except Exception:
-        return None
-    
-def is_allowed(rp: robotparser.RobotFileParser, url: str):
-    if not rp:
-        return True
-    try:
-        return rp.can_fetch(USER_AGENT, url)
-    except Exception:
-        return True
-    
-def extract_same_origin_links(base_url: str, html: str):
-    if not html:
-        return []
-    base_parsed = urlparse(base_url)
-    soup = BeautifulSoup(html, "html.parser")
-    links = set()
-    for a in soup.find_all("a", href=True):
-        href = a["href"].strip()
-        if href.startswith("mailto:") or href.startswith("javascript:"):
-            continue
-        href_full = urljoin(base_url, href)
-        href_full, _ = urldefrag(href_full)
-        parsed = urlparse(href_full)
-        if parsed.scheme not in ("http", "https"):
-            continue
-        if parsed.netloc == base_parsed.netloc:
-            links.add(href_full)
-    return list(links)
-
-def load_seen_urls(out_dir: str) -> set:
-    """Load previously crawled URLs."""
-    seen_file = os.path.join(out_dir, "seen_urls.json")
-    if os.path.exists(seen_file):
-        with open(seen_file, "r") as f:
-            return set(json.load(f))
-    return set()
-
-def save_seen_urls(out_dir: str, seen_urls: set):
-    """Save crawled URLs to prevent re-crawling."""
-    seen_file = os.path.join(out_dir, "seen_urls.json")
-    with open(seen_file, "w") as f:
-        json.dump(sorted(list(seen_urls)), f, indent=2)
-
-def save_page(out_dir: str, url: str, html: str, resp: requests.Response, seed: str,
-              canonical_url: str, referer: str, seed_id: int, logger):
-    """Save page with metadata (overwrites if exists)."""
-    name = sha_name(canonical_url)
-    html_path = os.path.join(out_dir, f"{name}.html")
-    meta_path = os.path.join(out_dir, f"{name}.json")
+    html_dir = "data/raw"
+    meta_dir = "data/metadata"
+    os.makedirs(html_dir, exist_ok=True)
+    os.makedirs(meta_dir, exist_ok=True)
 
     # Save HTML
-    with open(html_path, "wb") as f:
-        if isinstance(html, str):
-            f.write(html.encode("utf-8", errors="replace"))
-        else:
-            f.write(html or b"")
+    with open(os.path.join(html_dir, f"{sha}.html"), "w", encoding="utf-8") as f:
+        f.write(html)
 
-    # Calculate heuristic score using LLM
-    heuristic_score = calculate_blog_heuristic_score(html, url, logger)
-    requires_js = detect_js_requirement(html, url)
-
-    # Metadata
+    # Save metadata
     meta = {
         "url": url,
-        "canonical_url": canonical_url,
-        "seed": seed,
-        "seed_id": seed_id,
-        "fetched_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-        "status_code": resp.status_code if resp is not None else None,
-        "content_type": resp.headers.get("Content-Type") if resp is not None else None,
-        "content_length": len(html) if html else 0,
-        "final_url": resp.url if resp is not None else None,
-        "referer": referer,
-        "sha": name,
-        "crawler_version": CRAWLER_VERSION,
-        "heuristic_score": heuristic_score,
-        "requires_js": requires_js,
-        "headers": dict(resp.headers) if resp is not None else {},
+        "canonical_url": canonical,
+        "final_url": final_url,
+        "title": title,
+        "heuristic_score": score,
+        "sha": sha,
+        "fetched_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     }
 
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
+    with open(os.path.join(meta_dir, f"{sha}.json"), "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
 
-    return True
+def crawl(urls, limit):
+    visited = set()
+    saved = 0
 
+    for url in urls:
+        if saved >= limit:
+            break
 
-def polite_fetch(session: requests.Session, url: str, host_last_access: dict, default_rate: float,
-                 timeout: int, retries: int, rp_map: dict, logger):
-    """Fetch URL with politeness, rate limiting, and smart retry logic."""
-    parsed = urlparse(url)
-    host = parsed.netloc
+        canonical = canonicalize_url(url)
+        if canonical in visited:
+            continue
+        visited.add(canonical)
 
-    # Check robots
-    rp = rp_map.get(host)
-    if rp and not is_allowed(rp, url):
-        logger.debug(f"Disallowed by robots.txt: {url}")
-        return None, "disallowed-by-robots", None
-
-    # Compute delay
-    now = time.time()
-    last = host_last_access.get(host, 0)
-    wait = max(0, default_rate - (now - last))
-    if wait > 0:
-        time.sleep(wait)
-
-    attempt = 0
-    backoff = 1.0
-
-    while attempt <= retries:
         try:
-            resp = session.get(url, timeout=timeout, headers={"User-Agent": USER_AGENT})
-            host_last_access[host] = time.time()
-
-            # Handle rate limiting specifically
-            if resp.status_code == 429:
-                retry_after = resp.headers.get("Retry-After")
-                if retry_after:
-                    try:
-                        wait_time = int(retry_after)
-                    except ValueError:
-                        wait_time = 60
-                else:
-                    wait_time = min(300, backoff * 30)  # Cap at 5 minutes
-
-                logger.warning(f"Rate limited (429) for {url}, waiting {wait_time}s")
-                time.sleep(wait_time)
-                attempt += 1
-                backoff *= 2
+            resp = requests.get(url, timeout=10)
+            if resp.status_code != 200 or "text/html" not in resp.headers.get("Content-Type", ""):
                 continue
 
-            # Handle server errors with backoff
-            if resp.status_code == 503:
-                logger.warning(f"Service unavailable (503) for {url}, backing off")
-                time.sleep(backoff * 5)
-                attempt += 1
-                backoff *= 2
-                continue
-
-            return resp, None, None
-
-        except requests.Timeout:
-            logger.warning(f"Timeout for {url} (attempt {attempt + 1}/{retries + 1})")
-            attempt += 1
-            if attempt > retries:
-                return None, "timeout", None
-            time.sleep(backoff)
-            backoff *= 2
-
-        except requests.RequestException as e:
-            logger.warning(f"Request error for {url}: {repr(e)} (attempt {attempt + 1}/{retries + 1})")
-            attempt += 1
-            if attempt > retries:
-                return None, f"error:{repr(e)}", None
-            time.sleep(backoff)
-            backoff *= 2
-
-    return None, "max-retries-exceeded", None
-
-def crawl(seeds, out_dir, limit, rate, timeout, retries, max_depth):
-    """Single-threaded crawl with BFS."""
-    safe_makedirs(out_dir)
-    logger = setup_logging(out_dir)
-
-    logger.info(f"Starting crawl, max depth {max_depth}, limit {limit}")
-    logger.info(f"Seeds: {len(seeds)}")
-
-    # Setup
-    session = requests.Session()
-    session.headers.update({"User-Agent": USER_AGENT})
-
-    # Prepare robots per host
-    rp_map = {}
-    for s in seeds:
-        parsed = urlparse(s)
-        host = parsed.netloc
-        if host not in rp_map:
-            rp = fetch_robots(session, s)
-            rp_map[host] = rp
-            cd = get_crawl_delay(rp)
-            if isinstance(cd, (int, float)) and cd > 0:
-                rate = max(rate, float(cd))
-                logger.info(f"Using crawl-delay {cd}s for {host}")
-
-    # Simple state
-    url_queue = []
-    seen_urls = load_seen_urls(out_dir)
-    host_last_access = defaultdict(float)
-
-    # Stats
-    start_time = time.time()
-    pages_fetched = 0
-    pages_saved = 0
-    pages_failed = 0
-    pages_skipped = 0
-    bytes_downloaded = 0
-    errors = defaultdict(int)
-    domains_contacted = set()
-
-    # Seed the queue: (url, depth, seed, seed_id, referer)
-    for idx, s in enumerate(seeds):
-        url_queue.append((s, 0, s, idx, None))
-
-    # Crawl loop
-    while url_queue and pages_saved < limit:
-        url, depth, seed, seed_id, referer = url_queue.pop(0)
-
-        # Check if already seen
-        canonical_url = canonicalize_url(url)
-        if canonical_url in seen_urls:
-            pages_skipped += 1
-            continue
-        seen_urls.add(canonical_url)
-
-        # Check for traps
-        if is_potential_trap(canonical_url):
-            logger.debug(f"Skipping potential trap: {canonical_url}")
-            pages_skipped += 1
-            errors["potential-trap"] += 1
-            continue
-
-        # Fetch the page
-        resp, err, _ = polite_fetch(session, url, host_last_access, rate, timeout,
-                                     retries, rp_map, logger)
-
-        parsed = urlparse(url)
-        domains_contacted.add(parsed.netloc)
-
-        if err:
-            pages_failed += 1
-            errors[err] += 1
-            logger.debug(f"Failed to fetch {url}: {err}")
-            continue
-
-        if resp is None:
-            pages_failed += 1
-            errors["no-response"] += 1
-            continue
-
-        pages_fetched += 1
-
-        # Only save HTML
-        ctype = resp.headers.get("Content-Type", "")
-        if resp.status_code == 200 and "html" in ctype.lower():
             html = resp.text
-            bytes_downloaded += len(html)
+            title = extract_title(html)
+            score = 0  # Skip scoring for speed
 
-            try:
-                save_page(out_dir, url, html, resp, seed, canonical_url,
-                          referer, seed_id, logger)
-                pages_saved += 1
+            save_page(url, html, resp.url, title, score)
+            saved += 1
+            print(f"[{saved}/{limit}] {url}")
 
-                # Enqueue same-origin links if depth < max_depth
-                if depth < max_depth:
-                    links = extract_same_origin_links(url, html)
-                    for link in links:
-                        url_queue.append((link, depth + 1, seed, seed_id, url))
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            print(f"Error: {url} - {e}")
+            continue
 
-                # Log progress every 10 pages
-                if pages_saved % 10 == 0:
-                    logger.info(f"Progress: {pages_saved} saved, {pages_fetched} fetched, "
-                                f"{pages_failed} failed, {len(domains_contacted)} domains")
-
-            except Exception as e:
-                logger.error(f"Error saving page {url}: {repr(e)}")
-                pages_failed += 1
-                errors["save-error"] += 1
-        else:
-            pages_skipped += 1
-            if resp.status_code != 200:
-                errors[f"status-{resp.status_code}"] += 1
-
-    # Save seen URLs for next crawl
-    save_seen_urls(out_dir, seen_urls)
-
-    # Build summary
-    elapsed = time.time() - start_time
-    summary = {
-        "pages_fetched": pages_fetched,
-        "pages_saved": pages_saved,
-        "pages_failed": pages_failed,
-        "pages_skipped": pages_skipped,
-        "bytes_downloaded": bytes_downloaded,
-        "domains_contacted": len(domains_contacted),
-        "errors": dict(errors),
-        "elapsed_seconds": elapsed,
-        "pages_per_second": pages_fetched / elapsed if elapsed > 0 else 0,
-    }
-
-    logger.info(f"Crawl complete: {summary}")
-    return summary
-
-def generate_crawl_manifest(out_dir, summary, args):
-    """Generate crawl manifest with run details."""
-    manifest = {
-        "crawl_date": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-        "crawler_version": CRAWLER_VERSION,
-        "seeds_file": args.seeds,
-        "limit": args.limit,
-        "rate": args.rate,
-        "timeout": args.timeout,
-        "retries": args.retries,
-        "max_depth": args.max_depth,
-        "summary": summary,
-    }
-
-    manifest_path = os.path.join(out_dir, "crawl_manifest.json")
-    with open(manifest_path, "w") as f:
-        json.dump(manifest, f, indent=2)
-
-    return manifest_path
-
-def generate_report(out_dir, summary):
-    """Generate human-readable crawl report."""
-    report_path = os.path.join(out_dir, "crawl_report.txt")
-
-    with open(report_path, "w") as f:
-        f.write("=" * 60 + "\n")
-        f.write("CRAWL REPORT\n")
-        f.write("=" * 60 + "\n\n")
-
-        f.write(f"Pages fetched: {summary['pages_fetched']}\n")
-        f.write(f"Pages saved: {summary['pages_saved']}\n")
-        f.write(f"Pages failed: {summary['pages_failed']}\n")
-        f.write(f"Pages skipped: {summary['pages_skipped']}\n")
-        f.write(f"Unique pages: {summary['pages_saved']}\n")
-        f.write(f"Domains contacted: {summary['domains_contacted']}\n")
-        f.write(f"Total bytes: {summary['bytes_downloaded']:,} ({summary['bytes_downloaded'] / 1024 / 1024:.2f} MB)\n")
-        f.write(f"Elapsed time: {summary['elapsed_seconds']:.1f}s\n")
-        f.write(f"Pages per second: {summary['pages_per_second']:.2f}\n\n")
-
-        if summary['errors']:
-            f.write("Errors:\n")
-            for error, count in sorted(summary['errors'].items(), key=lambda x: x[1], reverse=True):
-                f.write(f"  {error}: {count}\n")
-
-    return report_path
-
-def export_candidates(out_dir, min_score=40, max_candidates=800):
-    """Export candidate pages for labeling based on heuristic scores."""
-    candidates = []
-
-    # Read all metadata files
-    for filename in os.listdir(out_dir):
-        if filename.endswith(".json") and not filename.startswith("crawl"):
-            meta_path = os.path.join(out_dir, filename)
-            try:
-                with open(meta_path, "r") as f:
-                    meta = json.load(f)
-
-                score = meta.get("heuristic_score", 0)
-                if score >= min_score:
-                    candidates.append({
-                        "url": meta.get("canonical_url", meta.get("url")),
-                        "score": score,
-                        "requires_js": meta.get("requires_js", False),
-                        "word_count": meta.get("content_length", 0) // 5,
-                        "domain": urlparse(meta.get("url", "")).netloc,
-                    })
-            except Exception:
-                continue
-
-    # Sort by score descending
-    candidates.sort(key=lambda x: x["score"], reverse=True)
-
-    # Limit to max_candidates
-    candidates = candidates[:max_candidates]
-
-    # Export to CSV
-    labels_dir = os.path.join(Path(out_dir).parent.parent, "labels")
-    safe_makedirs(labels_dir)
-    csv_path = os.path.join(labels_dir, "for_labeling.csv")
-
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["url", "score", "requires_js", "word_count", "domain"])
-        writer.writeheader()
-        writer.writerows(candidates)
-
-    return csv_path, len(candidates)
+    print(f"\nCrawl complete: {saved} pages saved")
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Comprehensive polite crawler for search engine building"
-    )
-    parser.add_argument("--seeds", required=True, help="Seeds file (one URL per line)")
-    parser.add_argument("--out", required=True, help="Output directory for raw HTML and metadata")
-    parser.add_argument("--limit", type=int, default=500, help="Max pages to save")
-    parser.add_argument("--rate", type=float, default=DEFAULT_RATE, help="Seconds between requests to same host")
-    parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="Request timeout seconds")
-    parser.add_argument("--retries", type=int, default=DEFAULT_RETRIES, help="Retries on transient errors")
-    parser.add_argument("--max-depth", type=int, default=DEFAULT_MAX_DEPTH, help="Max same-origin link depth")
-    parser.add_argument("--export-candidates", action="store_true", help="Export candidate pages for labeling")
-    parser.add_argument("--min-score", type=int, default=40, help="Minimum heuristic score for candidates")
+    parser = argparse.ArgumentParser(description="Crawl and score URLs")
+    parser.add_argument("--limit", type=int, default=500, help="Max pages")
     args = parser.parse_args()
 
-    seeds = read_seeds(args.seeds)
-    if not seeds:
-        print("No seeds found. Exiting.")
-        return
+    with open("data/crawled_websites.txt", "r") as f:
+        urls = [line.strip() for line in f if line.strip()]
 
-    print(f"Starting crawl with {len(seeds)} seeds...")
-    summary = crawl(seeds, args.out, args.limit, args.rate, args.timeout, args.retries,
-                    args.max_depth)
-
-    # Generate manifest and report
-    manifest_path = generate_crawl_manifest(args.out, summary, args)
-    report_path = generate_report(args.out, summary)
-
-    print(f"\n{'=' * 60}")
-    print("CRAWL COMPLETE")
-    print(f"{'=' * 60}")
-    print(f"Pages saved: {summary['pages_saved']}")
-    print(f"Pages fetched: {summary['pages_fetched']}")
-    print(f"Domains: {summary['domains_contacted']}")
-    print(f"Data: {summary['bytes_downloaded'] / 1024 / 1024:.2f} MB")
-    print(f"Time: {summary['elapsed_seconds']:.1f}s")
-    print(f"\nManifest: {manifest_path}")
-    print(f"Report: {report_path}")
-
-    # Export candidates if requested
-    if args.export_candidates:
-        print("\nExporting candidates for labeling...")
-        csv_path, count = export_candidates(args.out, args.min_score)
-        print(f"Exported {count} candidates to {csv_path}")
-
+    crawl(urls, args.limit)
 
 if __name__ == "__main__":
     main()
-
