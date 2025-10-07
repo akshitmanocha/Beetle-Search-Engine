@@ -1,1 +1,60 @@
-# DVC pipeline configuration
+params:
+- ETL.downloader
+- ETL.crawler
+- ETL.parser
+- ETL.heuristic_labeling
+
+stages:
+  crawl:
+    cmd: python src/ETL/website_crawler.py --limit ${ETL.crawler.max_urls_per_seed}
+    deps:
+    - src/ETL/website_crawler.py
+    - data/seeds/seed_domains.txt
+    params:
+    - ETL.crawler.max_urls_per_seed
+    - ETL.crawler.max_depth
+    - ETL.crawler.sleep_time
+    outs:
+    - data/crawled_websites.txt
+
+  download:
+    cmd: python src/ETL/download_html.py
+    deps:
+    - src/ETL/download_html.py
+    - data/crawled_websites.txt
+    params:
+    - ETL.downloader.max_workers
+    outs:
+    - data/raw
+    - data/metadata
+
+  parse:
+    cmd: python src/ETL/parse.py
+    deps:
+    - src/ETL/parse.py
+    - data/raw
+    - data/metadata
+    params:
+    - ETL.parser.min_word_count
+    outs:
+    - data/parsed
+
+  label:
+    cmd: python src/ETL/heuristic_label.py
+    deps:
+    - src/ETL/heuristic_label.py
+    - data/parsed
+    params:
+    - ETL.heuristic_labeling.score_threshold
+    - ETL.heuristic_labeling.ollama_model
+    outs:
+    - data/labels/weak.csv
+
+  filter:
+    cmd: python src/ETL/filter_blogs.py
+    deps:
+    - src/ETL/filter_blogs.py
+    - data/labels/weak.csv
+    - data/parsed
+    outs:
+    - data/clean

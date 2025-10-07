@@ -191,4 +191,5 @@ cython_debug/
 /data/crawled_websites.txt
 # Keep DVC files, ignore actual data
 /data/labels/weak.csv
-/data/labels/manual.csv
+# Cleaned data
+/data/clean/

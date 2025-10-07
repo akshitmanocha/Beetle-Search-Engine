@@ -1,0 +1,12 @@
+scraper:
+  downloader:
+    max_workers: 16
+  crawler:
+    max_depth: 2
+    sleep_time: 0
+    max_urls_per_seed: 1000
+  parser:
+    min_word_count: 100
+  heuristic_labeling:
+    score_threshold: 5
+    ollama_model: "granite3.3:2b"
