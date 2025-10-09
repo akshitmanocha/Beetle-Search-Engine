@@ -83,7 +83,7 @@ def download_pages(urls_file: Path, raw_dir: Path, meta_dir: Path, max_workers: 
 if __name__ == "__main__":
     with open("params.yaml", "r") as f:
         params = yaml.safe_load(f)
-        downloader_params = params['scraper']['downloader']
+        downloader_params = params['ETL']['downloader']
 
     project_root = Path(__file__).parent.parent.parent
     crawled_urls_file = project_root / "data" / "crawled_websites.txt"

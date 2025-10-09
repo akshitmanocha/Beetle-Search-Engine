@@ -1,4 +1,4 @@
-scraper:
+ETL:
   downloader:
     max_workers: 16
   crawler:

@@ -64,7 +64,7 @@ if __name__ == "__main__":
 
     with open("params.yaml", "r") as f:
         params = yaml.safe_load(f)
-        crawler_params = params['scraper']['crawler']
+        crawler_params = params['ETL']['crawler']
 
     # Correctly define project_root and other paths
     project_root = Path(__file__).parent.parent.parent

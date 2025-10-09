@@ -235,7 +235,7 @@ def parse_directory(raw_dir: Path, meta_dir: Path, parsed_dir: Path, min_word_co
 def main():
     with open("params.yaml", "r") as f:
         params = yaml.safe_load(f)
-        parser_params = params['scraper']['parser']
+        parser_params = params['ETL']['parser']
 
     project_root = Path(__file__).parent.parent.parent
     raw_dir = project_root / "data" / "raw"

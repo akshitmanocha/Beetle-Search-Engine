@@ -234,7 +234,7 @@ def generate_weak_labels(parsed_dir: Path, weak_labels_file: Path, score_thresho
 if __name__ == "__main__":
     with open("params.yaml", "r") as f:
         params = yaml.safe_load(f)
-        heuristic_params = params['scraper']['heuristic_labeling']
+        heuristic_params = params['ETL']['heuristic_labeling']
 
     project_root = Path(__file__).parent.parent.parent
     parsed_dir = project_root / "data" / "parsed"
