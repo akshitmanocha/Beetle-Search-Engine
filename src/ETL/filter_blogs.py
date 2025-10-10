@@ -16,22 +16,30 @@ def load_blog_labels(labels_path: Path) -> set:
     return blog_ids
 
 
-def load_parsed_blogs(parsed_dir: Path, blog_ids: set) -> List[Dict]:
+def load_parsed_blogs(parsed_file: Path, blog_ids: set) -> List[Dict]:
     """Load and filter blog posts from parsed data."""
-    blogs = []
+    print(f"Loading parsed data from {parsed_file}...")
 
-    for json_file in parsed_dir.glob('*.json'):
-        try:
-            with open(json_file, 'r', encoding='utf-8') as f:
-                doc = json.load(f)
+    try:
+        with open(parsed_file, 'r', encoding='utf-8') as f:
+            all_docs = json.load(f)
 
+        # Filter only the blogs and keep only essential fields
+        blogs = []
+        for doc in all_docs:
             if doc.get('id') in blog_ids:
-                blogs.append(doc)
+                blogs.append({
+                    'id': doc.get('id', ''),
+                    'url': doc.get('url', ''),
+                    'title': doc.get('title', ''),
+                    'body_text': doc.get('body_text', '')
+                })
 
-        except Exception as e:
-            print(f"  Warning: Failed to load {json_file.name}: {e}")
+        return blogs
 
-    return blogs
+    except Exception as e:
+        print(f"  Error loading parsed data: {e}")
+        return []
 
 
 def calculate_stats(blogs: List[Dict]) -> Dict:
@@ -39,24 +47,20 @@ def calculate_stats(blogs: List[Dict]) -> Dict:
     if not blogs:
         return {}
 
-    word_counts = [b.get('word_count', 0) for b in blogs]
+    word_counts = [len(b.get('body_text', '').split()) for b in blogs]
 
     return {
         'total_blogs': len(blogs),
         'avg_word_count': sum(word_counts) / len(word_counts) if word_counts else 0,
         'min_word_count': min(word_counts) if word_counts else 0,
         'max_word_count': max(word_counts) if word_counts else 0,
-        'with_authors': sum(1 for b in blogs if b.get('authors')),
-        'with_publish_date': sum(1 for b in blogs if b.get('publish_date')),
-        'avg_code_blocks': sum(b.get('code_blocks_count', 0) for b in blogs) / len(blogs),
     }
 
 
-def save_jsonl(blogs: List[Dict], output_path: Path):
-    """Save blogs as JSONL (one JSON per line)."""
+def save_json(blogs: List[Dict], output_path: Path):
+    """Save blogs as a single JSON file."""
     with open(output_path, 'w', encoding='utf-8') as f:
-        for blog in blogs:
-            f.write(json.dumps(blog, ensure_ascii=False) + '\n')
+        json.dump(blogs, f, indent=2, ensure_ascii=False)
 
 
 def filter_blogs():
@@ -65,7 +69,7 @@ def filter_blogs():
     project_root = Path(__file__).parent.parent.parent
 
     labels_path = project_root / 'data' / 'labels' / 'weak.csv'
-    parsed_dir = project_root / 'data' / 'parsed'
+    parsed_file = project_root / 'data' / 'parsed.json'
     output_dir = project_root / 'data' / 'clean'
 
     # Validate inputs
@@ -74,8 +78,8 @@ def filter_blogs():
         print(f"  Run the weak labeler first: dvc repro label")
         return
 
-    if not parsed_dir.exists():
-        print(f"✗ Error: {parsed_dir} not found")
+    if not parsed_file.exists():
+        print(f"✗ Error: {parsed_file} not found")
         print(f"  Run the parser first: dvc repro parse")
         return
 
@@ -86,29 +90,20 @@ def filter_blogs():
     blog_ids = load_blog_labels(labels_path)
     print(f"  Found {len(blog_ids)} blogs")
 
-    print(f"\nFiltering blog posts from {parsed_dir}...")
-    blogs = load_parsed_blogs(parsed_dir, blog_ids)
+    print(f"\nFiltering blog posts from {parsed_file}...")
+    blogs = load_parsed_blogs(parsed_file, blog_ids)
     print(f"  Loaded {len(blogs)}/{len(blog_ids)} blog posts")
 
     if len(blogs) == 0:
         print(f"\n✗ No blogs found!")
         return
 
-    # Sort by publish date (newest first, None last)
-    blogs.sort(
-        key=lambda x: x.get('publish_date') or '',
-        reverse=True
-    )
-
-    # Save as JSONL
-    output_path = output_dir / 'blogs.jsonl'
-    save_jsonl(blogs, output_path)
+    # Save as JSON
+    output_path = output_dir / 'blogs.json'
+    save_json(blogs, output_path)
 
     # Calculate and save statistics
     stats = calculate_stats(blogs)
-    stats_path = output_dir / 'stats.json'
-    with open(stats_path, 'w') as f:
-        json.dump(stats, f, indent=2)
 
     # Print summary
     file_size_mb = output_path.stat().st_size / (1024 * 1024)
@@ -117,11 +112,7 @@ def filter_blogs():
     print(f"  Total blogs: {stats['total_blogs']}")
     print(f"  Avg word count: {stats['avg_word_count']:.0f}")
     print(f"  Range: {stats['min_word_count']} - {stats['max_word_count']} words")
-    print(f"  With authors: {stats['with_authors']} ({100*stats['with_authors']/stats['total_blogs']:.1f}%)")
-    print(f"  With dates: {stats['with_publish_date']} ({100*stats['with_publish_date']/stats['total_blogs']:.1f}%)")
-    print(f"  Avg code blocks: {stats['avg_code_blocks']:.1f}")
     print(f"  File size: {file_size_mb:.2f} MB")
-    print(f"\n✓ Statistics saved: {stats_path}")
 
 
 if __name__ == '__main__':

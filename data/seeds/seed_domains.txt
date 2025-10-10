@@ -1,12 +1,7 @@
-huggingface.co/blog
-allenai.org/blog
 thegradient.pub
 distill.pub
-lesswrong.com
 towardsdatascience.com
-huggingface.co/papers/trending
 sebastianraschka.com
 fast.ai
 gwern.net
-argmin.net
 ruder.io

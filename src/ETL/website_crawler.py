@@ -31,26 +31,31 @@ def crawl(seed, out_path, max_urls, max_depth, sleep_time):
             if depth > max_depth or url in visited:
                 continue
             visited.add(url)
+
             try:
                 r = requests.get(url, headers=HEADERS, timeout=10)
                 if r.status_code != 200 or "text/html" not in r.headers.get(
                     "Content-Type", ""
                 ):
                     continue
-            except requests.RequestException:
+
+                out.write(url + "\n")
+                out.flush()
+                crawled_count += 1
+                print(f"Crawled {crawled_count}: {url}")
+
+                soup = BeautifulSoup(r.text, "html.parser")
+                for a in soup.find_all("a", href=True):
+                    try:
+                        abs_url = canonicalize_url(urljoin(url, a["href"]))
+                        if same_domain(abs_url, seed) and abs_url not in visited:
+                            q.append((abs_url, depth + 1))
+                    except ValueError:
+                        continue
+                time.sleep(sleep_time)
+            except Exception:
+                print(f"Failed to crawl {url}")
                 continue
-
-            out.write(url + "\n")
-            out.flush()
-            crawled_count += 1
-            print(f"Crawled {crawled_count}: {url}")
-
-            soup = BeautifulSoup(r.text, "html.parser")
-            for a in soup.find_all("a", href=True):
-                abs_url = canonicalize_url(urljoin(url, a["href"]))
-                if same_domain(abs_url, seed) and abs_url not in visited:
-                    q.append((abs_url, depth + 1))
-            time.sleep(sleep_time)
 
 
 if __name__ == "__main__":

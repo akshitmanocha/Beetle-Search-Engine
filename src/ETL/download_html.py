@@ -5,8 +5,7 @@ Downloads HTML content from a list of URLs and saves it to the data/raw director
 
 import concurrent.futures
 import hashlib
-import json
-from datetime import datetime, timezone
+import argparse
 from pathlib import Path
 import yaml
 
@@ -20,7 +19,7 @@ def sha_name(url: str) -> str:
     return hashlib.sha256(url.encode("utf-8")).hexdigest()
 
 
-def download_url(url: str, raw_dir: Path, meta_dir: Path) -> bool:
+def download_url(url: str, raw_dir: Path) -> bool:
     """Download a single URL and save it."""
     try:
         r = requests.get(url, headers=HEADERS, timeout=10)
@@ -32,32 +31,22 @@ def download_url(url: str, raw_dir: Path, meta_dir: Path) -> bool:
 
         sha = sha_name(url)
         html_path = raw_dir / f"{sha}.html"
-        meta_path = meta_dir / f"{sha}.json"
 
         # Save HTML
         with open(html_path, "w", encoding="utf-8") as f:
             f.write(r.text)
 
-        # Save metadata
-        metadata = {
-            "url": url,
-            "sha": sha,
-            "fetched_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        }
-        with open(meta_path, "w") as f:
-            json.dump(metadata, f, indent=2)
-
         return True
 
-    except requests.RequestException as e:
-        print(f"  Error downloading {url}: {e}")
+    except Exception as e:
+        # Skip this URL on any error and continue with the next one
+        print(f"  Failed to download {url}: {e}")
         return False
 
 
-def download_pages(urls_file: Path, raw_dir: Path, meta_dir: Path, max_workers: int):
+def download_pages(urls_file: Path, raw_dir: Path, max_workers: int):
     """Download HTML from a list of URLs concurrently."""
     raw_dir.mkdir(parents=True, exist_ok=True)
-    meta_dir.mkdir(parents=True, exist_ok=True)
 
     with open(urls_file, "r") as f:
         urls = [line.strip() for line in f if line.strip()]
@@ -68,7 +57,7 @@ def download_pages(urls_file: Path, raw_dir: Path, meta_dir: Path, max_workers: 
         max_workers=max_workers
     ) as executor:
         future_to_url = {
-            executor.submit(download_url, url, raw_dir, meta_dir): url for url in urls
+            executor.submit(download_url, url, raw_dir): url for url in urls
         }
         for future in concurrent.futures.as_completed(future_to_url):
             if future.result():
@@ -81,6 +70,14 @@ def download_pages(urls_file: Path, raw_dir: Path, meta_dir: Path, max_workers: 
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Download HTML content from a list of URLs.")
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        help="Maximum number of concurrent workers for downloading."
+    )
+    args = parser.parse_args()
+
     with open("params.yaml", "r") as f:
         params = yaml.safe_load(f)
         downloader_params = params['ETL']['downloader']
@@ -88,7 +85,6 @@ if __name__ == "__main__":
     project_root = Path(__file__).parent.parent.parent
     crawled_urls_file = project_root / "data" / "crawled_websites.txt"
     raw_dir = project_root / "data" / "raw"
-    meta_dir = project_root / "data" / "metadata"
 
     if not crawled_urls_file.exists():
         print(f"✗ Error: {crawled_urls_file} not found")
@@ -97,6 +93,5 @@ if __name__ == "__main__":
         download_pages(
             crawled_urls_file,
             raw_dir,
-            meta_dir,
-            max_workers=downloader_params['max_workers']
+            max_workers=args.max_workers or downloader_params['max_workers']
         )

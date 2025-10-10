@@ -8,5 +8,4 @@ ETL:
   parser:
     min_word_count: 100
   heuristic_labeling:
-    score_threshold: 5
-    ollama_model: "granite3.3:2b"
+    score_threshold: 8

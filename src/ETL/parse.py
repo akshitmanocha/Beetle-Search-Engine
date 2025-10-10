@@ -5,14 +5,15 @@ Enhanced HTML Parser - Extracts comprehensive content and features from crawled 
 
 import hashlib
 import json
-import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 import yaml
 
 from bs4 import BeautifulSoup
-from newspaper import Article
+from trafilatura import extract
+from trafilatura.metadata import extract_metadata as meta_extract
+from readability import Document
 
 PARSER_VERSION = "2.0.0"
 
@@ -22,33 +23,46 @@ def sha_name(url: str) -> str:
     return hashlib.sha256(url.encode("utf-8")).hexdigest()
 
 
-def extract_with_newspaper(html: str, url: str):
-    """Use newspaper3k to extract article metadata."""
+def _normalize_metadata(meta):
+    if not meta:
+        return {}
+    if isinstance(meta, dict):
+        return meta
+    # meta is an object (Document). copy relevant fields to a dict.
+    return {
+        "title": getattr(meta, "title", None),
+        "author": getattr(meta, "author", None) or getattr(meta, "authors", None),
+        "date": getattr(meta, "date", None),
+    }
+
+def extract_with_trafilatura(html: str, url: str):
+    """Use Trafilatura to extract article metadata (robust to return type)."""
     try:
-        article = Article(url)
-        article.set_html(html)
-        article.parse()
+        text = extract(html, include_comments=False, include_tables=False, url=url)
+        raw_meta = meta_extract(html)
+        metadata = _normalize_metadata(raw_meta)
+
+        author_raw = metadata.get("author") or ""
+        if isinstance(author_raw, (list, tuple)):
+            authors = [str(a).strip() for a in author_raw if str(a).strip()]
+        else:
+            authors = [a.strip() for a in re.split(r'[,;]|\band\b', str(author_raw)) if a.strip()]
+
+        date_raw = metadata.get("date")
+        if date_raw:
+            publish_date = date_raw.isoformat() if hasattr(date_raw, "isoformat") else str(date_raw)
+        else:
+            publish_date = None
+
         return {
-            "title": article.title,
-            "authors": article.authors,
-            "publish_date": (
-                article.publish_date.isoformat() if article.publish_date else None
-            ),
-            "text": article.text,
+            "title": metadata.get("title") or None,
+            "authors": authors,
+            "publish_date": publish_date,
+            "text": text,
         }
-    except:
-        print("parsing with newspaper failed")
+    except Exception as e:
+        print(f"  Trafilatura parsing failed for {url}: {e}")
         return None
-
-
-def extract_headers(soup: BeautifulSoup) -> list:
-    """Extract all headers (h1-h6)."""
-    headers = []
-    for i in range(1, 7):
-        for tag in soup.find_all(f"h{i}"):
-            headers.append({"level": i, "text": tag.get_text(strip=True)})
-    return headers
-
 
 def count_code_blocks(soup: BeautifulSoup) -> int:
     """Count code blocks (<pre>, <code>, <pre><code>)."""
@@ -116,66 +130,59 @@ def detect_author_bio(soup: BeautifulSoup) -> bool:
     return False
 
 
-def extract_content_fallback(soup: BeautifulSoup) -> str:
-    """Fallback content extraction."""
-    for tag in soup(["script", "style", "nav", "header", "footer"]):
-        tag.decompose()
+def extract_with_readability(html: str) -> str:
+    """Fallback content extraction using readability-lxml."""
+    try:
+        doc = Document(html)
+        # Extract the main content
+        content_html = doc.summary()
+        # Convert HTML to text using BeautifulSoup
+        soup = BeautifulSoup(content_html, "html.parser")
+        return soup.get_text(separator=" ", strip=True)
+    except Exception as e:
+        print(f"  Readability extraction failed: {e}")
+        return ""
 
-    main = soup.find("article") or soup.find("main") or soup.find("body")
-    if main:
-        return main.get_text(separator=" ", strip=True)
-    return soup.get_text(separator=" ", strip=True)
 
-
-def parse_html_file(html_path: str, metadata_path: str, min_word_count: int) -> dict:
+def parse_html_file(html_path: str, url: str, min_word_count: int) -> dict:
     """Parse HTML file and extract comprehensive content and features."""
     # Load HTML
     with open(html_path, "r", encoding="utf-8", errors="ignore") as f:
         html = f.read()
 
-    # Load metadata
-    metadata = {}
-    if os.path.exists(metadata_path):
-        try:
-            with open(metadata_path, "r") as f:
-                metadata = json.load(f)
-        except:
-            pass
+    sha = sha_name(url)
 
-    url = metadata.get("url", "unknown")
-    sha = metadata.get("sha", sha_name(url))
-
-    # Parse with newspaper3k
-    newspaper_data = extract_with_newspaper(html, url)
+    # Parse with Trafilatura
+    trafilatura_data = extract_with_trafilatura(html, url)
 
     # Parse with BeautifulSoup
     soup = BeautifulSoup(html, "html.parser")
 
-    # Extract content - only use newspaper if it extracted substantial content
-
-    if newspaper_data and newspaper_data["text"]:
-        word_count = len(newspaper_data["text"].split())
-        if word_count >= min_word_count:
-            # Newspaper extracted good content
-            title = newspaper_data["title"] or metadata.get("title", "Untitled")
-            body_text = newspaper_data["text"]
-            authors = newspaper_data["authors"]
-            publish_date = newspaper_data["publish_date"]
+    # Extract content - only use trafilatura if it extracted substantial content
+    if trafilatura_data and trafilatura_data["text"]:
+        word_count = len(trafilatura_data["text"].split())
+        if word_count >= 50:
+            # Trafilatura extracted good content
+            title = trafilatura_data["title"] or "Untitled"
+            body_text = trafilatura_data["text"]
+            authors = trafilatura_data["authors"]
+            publish_date = trafilatura_data["publish_date"]
         else:
-            # Newspaper extraction too short, use fallback
-            title = newspaper_data["title"] or metadata.get("title", "Untitled")
-            body_text = extract_content_fallback(soup)
-            authors = newspaper_data["authors"] if newspaper_data["authors"] else []
-            publish_date = newspaper_data["publish_date"]
+            # Trafilatura extraction too short, use readability fallback
+            print("        [INFO] Trafilatura extraction too short, using readability fallback")
+            title = trafilatura_data["title"] or "Untitled"
+            body_text = extract_with_readability(html)
+            authors = trafilatura_data["authors"] if trafilatura_data["authors"] else []
+            publish_date = trafilatura_data["publish_date"]
     else:
-        # Newspaper failed completely, use fallback
-        title = metadata.get("title", "Untitled")
-        body_text = extract_content_fallback(soup)
+        # Trafilatura failed completely, use readability fallback
+        print("        [INFO] Trafilatura failed, using readability fallback")
+        title = "Untitled"
+        body_text = extract_with_readability(html)
         authors = []
         publish_date = None
 
     # Extract features
-    headers = extract_headers(soup)
     code_blocks_count = count_code_blocks(soup)
     citations = detect_citations(soup, body_text)
     has_author_bio = detect_author_bio(soup)
@@ -183,12 +190,10 @@ def parse_html_file(html_path: str, metadata_path: str, min_word_count: int) -> 
     return {
         "id": sha,
         "url": url,
-        "canonical_url": metadata.get("canonical_url", url),
         "title": title,
         "authors": authors,
         "publish_date": publish_date,
         "body_text": body_text,
-        "headers": headers,
         "word_count": len(body_text.split()),
         "char_count": len(body_text),
         "code_blocks_count": code_blocks_count,
@@ -196,40 +201,55 @@ def parse_html_file(html_path: str, metadata_path: str, min_word_count: int) -> 
         "has_doi_citation": citations["has_doi"],
         "has_references_section": citations["has_references_section"],
         "has_author_bio": has_author_bio,
-        "fetched_at": metadata.get("fetched_at"),
         "parse_date": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
 
 
-def parse_directory(raw_dir: Path, meta_dir: Path, parsed_dir: Path, min_word_count: int):
-    """Parse all HTML files from data/raw using metadata from data/metadata."""
-    parsed_dir.mkdir(parents=True, exist_ok=True)
+def parse_directory(urls_file: Path, raw_dir: Path, parsed_file: Path, min_word_count: int):
+    """Parse all HTML files from data/raw using URLs from crawled_websites.txt."""
+    parsed_file.parent.mkdir(parents=True, exist_ok=True)
 
-    html_files = list(raw_dir.glob("*.html"))
-    print(f"Parsing {len(html_files)} files...")
+    # Read URLs
+    with open(urls_file, "r") as f:
+        urls = [line.strip() for line in f if line.strip()]
 
+    print(f"Parsing {len(urls)} URLs...")
+
+    all_data = []
     succeeded = 0
     failed = 0
+    skipped = 0
 
-    for html_file in html_files:
+    for url in urls:
         try:
-            meta_file = meta_dir / html_file.with_suffix(".json").name
-            data = parse_html_file(str(html_file), str(meta_file), min_word_count)
+            # Get the HTML file path
+            sha = sha_name(url)
+            html_file = raw_dir / f"{sha}.html"
 
-            output = parsed_dir / f"{data['id']}.json"
-            with open(output, "w") as f:
-                json.dump(data, f, indent=2)
+            # Skip if HTML file doesn't exist
+            if not html_file.exists():
+                skipped += 1
+                continue
+
+            # Parse the HTML file
+            data = parse_html_file(str(html_file), url, min_word_count)
+            all_data.append(data)
 
             succeeded += 1
 
             if succeeded % 10 == 0:
-                print(f"  {succeeded}/{len(html_files)}...")
+                print(f"  {succeeded}/{len(urls)}...")
 
         except Exception as e:
             failed += 1
-            print(f"  Error: {html_file.name} - {e}")
+            print(f"  Error parsing {url}: {e}")
 
-    print(f"\nDone: {succeeded} succeeded, {failed} failed")
+    # Save all parsed data to a single JSON file
+    with open(parsed_file, "w", encoding="utf-8") as f:
+        json.dump(all_data, f, indent=2, ensure_ascii=False)
+
+    print(f"\nDone: {succeeded} succeeded, {failed} failed, {skipped} skipped (no HTML file)")
+    print(f"✓ Saved all parsed data to: {parsed_file}")
 
 
 def main():
@@ -238,14 +258,19 @@ def main():
         parser_params = params['ETL']['parser']
 
     project_root = Path(__file__).parent.parent.parent
+    urls_file = project_root / "data" / "crawled_websites.txt"
     raw_dir = project_root / "data" / "raw"
-    meta_dir = project_root / "data" / "metadata"
-    parsed_dir = project_root / "data" / "parsed"
+    parsed_file = project_root / "data" / "parsed.json"
+
+    if not urls_file.exists():
+        print(f"✗ Error: {urls_file} not found")
+        print(f"  Run the crawler first: dvc repro crawl")
+        return
 
     parse_directory(
+        urls_file,
         raw_dir,
-        meta_dir,
-        parsed_dir,
+        parsed_file,
         min_word_count=parser_params['min_word_count']
     )
 

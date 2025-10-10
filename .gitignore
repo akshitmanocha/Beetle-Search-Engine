@@ -194,3 +194,15 @@ cython_debug/
 # Cleaned data
 /data/clean/
 GEMINI.md
+
+# Ignore the entire data directory (managed by DVC)
+data/
+
+# Ignore model weight files
+*.joblib
+*.pt
+*.h5
+*.bin
+*.onnx
+*.ckpt
+*.pth
