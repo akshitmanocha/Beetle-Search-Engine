@@ -9,3 +9,9 @@ ETL:
     min_word_count: 100
   heuristic_labeling:
     score_threshold: 8
+
+models:
+  embedding:
+    model_name: "togethercomputer/m2-bert-80M-2k-retrieval"
+    batch_size: 1
+    device: "mps"
