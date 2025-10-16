@@ -1,18 +1,38 @@
 import json
+import os
 from pathlib import Path
 import torch
 from transformers import AutoTokenizer, AutoModelForMaskedLM
 import numpy as np
 
+# Disable tokenizers parallelism to avoid multiprocessing issues
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 # --- Model and Tokenizer Loading ---
-DEVICE = 'cuda'
+# Proper device selection for macOS, CUDA, and CPU
+if torch.cuda.is_available():
+    DEVICE = 'cuda'
+elif torch.backends.mps.is_available():
+    DEVICE = 'mps'
+else:
+    DEVICE = 'cpu'
+
 MODEL_ID = "naver/splade-cocondenser-ensembledistil"
-tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-model = AutoModelForMaskedLM.from_pretrained(MODEL_ID).to(DEVICE)
-model.eval()
+tokenizer = None
+model = None
+
+def _get_model_and_tokenizer():
+    """Lazy load model and tokenizer on first use."""
+    global tokenizer, model
+    if tokenizer is None or model is None:
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+        model = AutoModelForMaskedLM.from_pretrained(MODEL_ID).to(DEVICE)
+        model.eval()
+    return tokenizer, model
 
 def _generate_splade_vector(text: str) -> dict[int, float]:
     """Generates a sparse SPLADE vector for a given text."""
+    tokenizer, model = _get_model_and_tokenizer()
     tokens = tokenizer(text, return_tensors="pt", truncation=True, max_length=512).to(DEVICE)
     with torch.no_grad():
         logits = model(**tokens).logits
@@ -65,6 +85,7 @@ def main():
 
     # --- Perform a search ---
     print("\n" + "="*20)
+    print(f"Using device: {DEVICE}")
     print("Performing a sample search...")
     sample_query = "transformer models for NLP"
     results = search_splade(sample_query, index_path, doc_map_path)

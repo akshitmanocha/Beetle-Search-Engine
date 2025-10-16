@@ -12,6 +12,7 @@ def get_schema():
         body_text=TEXT(stored=True, analyzer=StemmingAnalyzer()),
     )
 
+
 def build_bm25_index(data_path: Path, index_path: Path):
     """
     Builds and saves a Whoosh BM25 index.
@@ -40,11 +41,11 @@ def build_bm25_index(data_path: Path, index_path: Path):
         )
     
     writer.commit()
-    print(f"✓ BM25 index built and saved to {index_path}")
+    print(f"BM25 index built and saved to {index_path}")
 
 if __name__ == '__main__':
     project_root = Path(__file__).parent.parent.parent
-    data_path = project_root / "data" / "parsed.json"
+    data_path = project_root / "data" / "clean" / "blogs.json"
     index_path = project_root / "data" / "bm25_index"
 
     build_bm25_index(data_path, index_path)

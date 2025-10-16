@@ -5,7 +5,7 @@ from transformers import AutoTokenizer, AutoModelForMaskedLM
 from tqdm import tqdm
 
 # --- Model and Tokenizer Loading ---
-DEVICE = 'cuda'
+DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 MODEL_ID = "naver/splade-cocondenser-ensembledistil"
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 model = AutoModelForMaskedLM.from_pretrained(MODEL_ID).to(DEVICE)

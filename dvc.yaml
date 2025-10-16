@@ -3,6 +3,7 @@ params:
 - ETL.crawler
 - ETL.parser
 - ETL.heuristic_labeling
+- models.embedding
 
 stages:
   crawl:
@@ -46,9 +47,17 @@ stages:
     - data/parsed
     params:
     - ETL.heuristic_labeling.score_threshold
-    - ETL.heuristic_labeling.ollama_model
     outs:
     - data/labels/weak.csv
+
+  train_tfidf:
+    cmd: python src/models/train_tfidf.py
+    deps:
+    - src/models/train_tfidf.py
+    - data/labels/weak.csv
+    - data/parsed.json
+    outs:
+    - data/labels/strong.csv
 
   filter:
     cmd: python src/ETL/filter_blogs.py
@@ -58,3 +67,37 @@ stages:
     - data/parsed
     outs:
     - data/clean
+
+  embed:
+    cmd: python -m src.models.embed
+    deps:
+    - src/models/embed.py
+    - data/clean
+    params:
+    - models.embedding
+    outs:
+    - data/embeddings
+
+  build_faiss:
+    cmd: python -m src.index.build_faiss
+    deps:
+    - src/index/build_faiss.py
+    - data/embeddings
+    outs:
+    - data/faiss_index
+
+  build_bm25:
+    cmd: python -m src.index.build_bm25
+    deps:
+    - src/index/build_bm25.py
+    - data/parsed
+    outs:
+    - data/bm25_index
+
+  build_splade:
+    cmd: python -m src.index.build_splade
+    deps:
+    - src/index/build_splade.py
+    - data/parsed
+    outs:
+    - data/splade_index

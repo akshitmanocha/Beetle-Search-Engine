@@ -4,6 +4,7 @@ Generate sentence embeddings for blog posts using a SentenceTransformer model.
 """
 
 import json
+import os
 import pickle
 from pathlib import Path
 
@@ -75,6 +76,9 @@ def save_embeddings(embedding_map: dict, output_path: Path):
 
 def main():
     """Main function to run the embedding generation process."""
+    # Disable tokenizers parallelism to avoid multiprocessing issues
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
     project_root = Path(__file__).parent.parent.parent
 
     # Load parameters
@@ -83,17 +87,18 @@ def main():
 
     model_name = params['model_name']
     batch_size = params['batch_size']
-    device = params['device']
-    device = "gpu" 
+
+    # Proper device selection for macOS, CUDA, and CPU
+    if torch.cuda.is_available():
+        device = 'cuda'
+    elif torch.backends.mps.is_available():
+        device = 'mps'
+    else:
+        device = 'cpu'
 
     # Define paths
     data_path = project_root / "data" / "clean" / "blogs.json"
     output_path = project_root / "data" / "embeddings" / "embeddings.pkl"
-
-    # Check for CUDA availability
-    if device == "cuda" and not torch.cuda.is_available():
-        print("✗ cuda not available, falling back to CPU.")
-        device = "cpu"
 
     print(f"Using device: {device}")
 

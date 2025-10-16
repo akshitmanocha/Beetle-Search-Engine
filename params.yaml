@@ -12,6 +12,14 @@ ETL:
 
 models:
   embedding:
-    model_name: "togethercomputer/m2-bert-80M-2k-retrieval"
+    model_name: Qwen/Qwen3-Embedding-0.6B
     batch_size: 1
-    device: "mps"
+    device: "cuda"
+  reranker:
+    model_name: "ibm-granite/granite-embedding-reranker-english-r2"
+
+search:
+  method: "bm25"
+  top_k: 20
+  rerank_k: 20
+  reranker: false

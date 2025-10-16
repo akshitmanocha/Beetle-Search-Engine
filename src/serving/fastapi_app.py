@@ -1,1 +1,0 @@
-# FastAPI app (search endpoints + health + metrics)

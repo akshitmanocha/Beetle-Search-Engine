@@ -1,7 +1,13 @@
+import os
+import sys
 from pathlib import Path
+project_root = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(project_root))
+
 import numpy as np
 import faiss
 import json
+import torch
 from src.models.embed import generate_embeddings
 import yaml
 
@@ -47,25 +53,32 @@ def search_faiss(query_str: str, model_name: str, device: str, index_path: Path,
         doc_id_index = indices[0][i]
         if doc_id_index != -1:
             results.append((doc_ids[doc_id_index], distances[0][i]))
-            
+
     return results
 
 
 if __name__ == '__main__':
-    project_root = Path(__file__).parent.parent.parent
     index_path = project_root / "data" / "faiss_index" / "faiss.index"
-    doc_id_map_path = project_root / "data" / "faiss_index" / "faiss.index.json"
-    
-    # Example search
+    doc_id_map_path = index_path.with_suffix('.json')
+
     print("\nPerforming a sample search...")
     with open(project_root / "params.yaml", "r") as f:
         params = yaml.safe_load(f)['models']['embedding']
+
+    if torch.cuda.is_available():
+        device = 'cuda'
+    elif torch.backends.mps.is_available():
+        device = 'mps'
+    else:
+        device = 'cpu'
+
+    print(f"Using device: {device}")
 
     sample_query = "transformer models"
     results = search_faiss(
         sample_query,
         params['model_name'],
-        params['device'],
+        device,
         index_path,
         doc_id_map_path
     )

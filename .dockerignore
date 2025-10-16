@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Git
+.git/
+.gitignore
+.github/
+
+# DVC
+.dvc/
+dvc.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.claude/
+
+# Docker
+Dockerfile
+docker-compose.yaml
+.dockerignore
+
+# Documentation
+*.md
+README*
+
+# Other
+.DS_Store
+*.log
+.env

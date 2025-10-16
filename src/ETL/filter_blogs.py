@@ -10,7 +10,7 @@ from typing import List, Dict
 
 
 def load_blog_labels(labels_path: Path) -> set:
-    """Load blog IDs from weak labels CSV."""
+    """Load blog IDs from strong labels CSV."""
     df = pd.read_csv(labels_path)
     blog_ids = set(df[df['label'] == 'blog']['id'])
     return blog_ids
@@ -68,7 +68,7 @@ def filter_blogs():
     # Get script directory and project root
     project_root = Path(__file__).parent.parent.parent
 
-    labels_path = project_root / 'data' / 'labels' / 'weak.csv'
+    labels_path = project_root / 'data' / 'labels' / 'strong.csv'
     parsed_file = project_root / 'data' / 'parsed.json'
     output_dir = project_root / 'data' / 'clean'
 

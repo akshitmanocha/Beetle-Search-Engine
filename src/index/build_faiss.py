@@ -19,14 +19,14 @@ def build_faiss_index(embedding_path: Path, index_path: Path):
     doc_ids = list(embedding_map.keys())
     embeddings = np.array(list(embedding_map.values()), dtype='float32')
 
-    if not embeddings.any():
+    if len(embeddings) == 0:
         print("No embeddings found to index.")
         return
 
     # Get the dimension of the embeddings
     d = embeddings.shape[1]
 
-    # Build the FAiss index
+    # Build the Faiss index
     index = faiss.IndexFlatL2(d)  # Using L2 distance
     index = faiss.IndexIDMap(index) # Mapping from index to document ID
 
@@ -45,7 +45,7 @@ def build_faiss_index(embedding_path: Path, index_path: Path):
     print(f"✓ Document ID mapping saved to {index_path.with_suffix('.json')}")
 
 if __name__ == '__main__':
-    project_root = Path(__file__).parent.parent.parent
+    project_root = Path(__file__).resolve().parents[2]
     embedding_path = project_root / "data" / "embeddings" / "embeddings.pkl"
     index_path = project_root / "data" / "faiss_index" / "faiss.index"
     
