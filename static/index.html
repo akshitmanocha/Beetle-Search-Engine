@@ -23,35 +23,6 @@
                 >
                 <button id="searchButton">Search</button>
             </div>
-
-            <div class="options-panel">
-                <div class="option-group">
-                    <label for="searchMethod">Search Method:</label>
-                    <select id="searchMethod">
-                        <option value="hybrid">Hybrid</option>
-                        <option value="bm25">BM25</option>
-                        <option value="faiss">FAISS</option>
-                        <option value="splade">SPLADE</option>
-                    </select>
-                </div>
-
-                <div class="option-group">
-                    <label for="topK">Initial Results:</label>
-                    <input type="number" id="topK" value="20" min="1" max="100">
-                </div>
-
-                <div class="option-group">
-                    <label for="rerankK">Final Results:</label>
-                    <input type="number" id="rerankK" value="5" min="1" max="50">
-                </div>
-
-                <div class="option-group">
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="rerankerEnabled">
-                        Enable Reranking
-                    </label>
-                </div>
-            </div>
         </div>
 
         <div id="loadingSpinner" class="loading-spinner" style="display: none;">

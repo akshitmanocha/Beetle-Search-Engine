@@ -4,10 +4,6 @@ const API_URL = 'http://localhost:8000';
 // DOM elements
 const searchInput = document.getElementById('searchInput');
 const searchButton = document.getElementById('searchButton');
-const searchMethod = document.getElementById('searchMethod');
-const topK = document.getElementById('topK');
-const rerankK = document.getElementById('rerankK');
-const rerankerEnabled = document.getElementById('rerankerEnabled');
 
 const loadingSpinner = document.getElementById('loadingSpinner');
 const resultsContainer = document.getElementById('resultsContainer');
@@ -16,17 +12,26 @@ const resultsInfo = document.getElementById('resultsInfo');
 const resultsList = document.getElementById('resultsList');
 const errorMessage = document.getElementById('errorMessage');
 
-// Load config on page load
+// Search configuration from params.yaml
+let searchConfig = {
+    top_k: 20,
+    rerank_k: 5,
+    method: 'hybrid',
+    reranker: false
+};
+
+// Load config from backend on page load
 async function loadConfig() {
     try {
         const response = await fetch(`${API_URL}/config`);
         if (response.ok) {
             const config = await response.json();
             if (config.search) {
-                topK.value = config.search.top_k || 20;
-                rerankK.value = config.search.rerank_k || 5;
-                searchMethod.value = config.search.method || 'hybrid';
-                rerankerEnabled.checked = config.search.reranker || false;
+                searchConfig.top_k = config.search.top_k || 20;
+                searchConfig.rerank_k = config.search.rerank_k || 5;
+                searchConfig.method = config.search.method || 'hybrid';
+                searchConfig.reranker = config.search.reranker || false;
+                console.log('Loaded search configuration:', searchConfig);
             }
         }
     } catch (error) {
@@ -51,10 +56,10 @@ async function performSearch() {
 
     const requestBody = {
         query: query,
-        top_k: parseInt(topK.value),
-        rerank_k: parseInt(rerankK.value),
-        search_method: searchMethod.value,
-        reranker_enabled: rerankerEnabled.checked
+        top_k: searchConfig.top_k,
+        rerank_k: searchConfig.rerank_k,
+        search_method: searchConfig.method,
+        reranker_enabled: searchConfig.reranker
     };
 
     try {
@@ -116,21 +121,17 @@ function createResultItem(result, number, hasReranking) {
     const item = document.createElement('div');
     item.className = 'result-item';
 
-    const title = document.createElement('div');
-    title.className = 'result-title';
-    title.innerHTML = `
+    // Create clickable title with embedded link
+    const titleLink = document.createElement('a');
+    titleLink.className = 'result-title-link';
+    titleLink.href = result.url || '#';
+    titleLink.target = '_blank';
+    titleLink.innerHTML = `
         <span class="result-number">${number}</span>
         ${escapeHtml(result.title || 'Untitled')}
     `;
 
-    const link = document.createElement('a');
-    link.className = 'result-link';
-    link.href = result.url || '#';
-    link.target = '_blank';
-    link.textContent = result.url || 'No URL';
-
-    item.appendChild(title);
-    item.appendChild(link);
+    item.appendChild(titleLink);
 
     // Display score if available
     if (hasReranking && result.rerank_score !== undefined) {
@@ -140,11 +141,12 @@ function createResultItem(result, number, hasReranking) {
         item.appendChild(score);
     }
 
-    // Display description if available
-    if (result.content) {
+    // Display body content preview
+    const bodyContent = result.body_text || result.content || '';
+    if (bodyContent) {
         const description = document.createElement('div');
         description.className = 'result-description';
-        const truncatedContent = result.content.substring(0, 300) + (result.content.length > 300 ? '...' : '');
+        const truncatedContent = bodyContent.substring(0, 350) + (bodyContent.length > 350 ? '...' : '');
         description.textContent = truncatedContent;
         item.appendChild(description);
     }

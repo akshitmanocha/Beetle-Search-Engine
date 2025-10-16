@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from pathlib import Path
@@ -42,7 +43,7 @@ class SearchResponse(BaseModel):
 
 @app.get("/")
 async def root():
-    return {"message": "Blog Search Engine API", "status": "running"}
+    return RedirectResponse(url="/static/index.html")
 
 
 @app.post("/search", response_model=SearchResponse)
