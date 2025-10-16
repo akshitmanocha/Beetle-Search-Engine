@@ -3,42 +3,98 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Blog Search Engine</title>
-    <link rel="stylesheet" href="style.css">
+    <title>Beetle Search Engine</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .spinner {
+            border: 3px solid #f0f0f0;
+            border-top: 3px solid #4285f4;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+        }
+        .beetle-icon {
+            animation: float 3s ease-in-out infinite;
+        }
+    </style>
 </head>
-<body>
-    <div class="container">
-        <header>
-            <h1>Blog Search Engine</h1>
-            <p class="subtitle">Search through blogs using advanced retrieval methods</p>
+<body class="bg-gray-50 min-h-screen">
+    <div class="w-full">
+        <!-- Header -->
+        <header class="bg-white border-b border-gray-200 py-12 px-8">
+            <div class="max-w-7xl mx-auto text-center">
+                <div class="flex items-center justify-center gap-3 mb-3">
+                    <span class="text-5xl beetle-icon">🪲</span>
+                    <h1 class="text-5xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
+                        Beetle Search
+                    </h1>
+                </div>
+                <p class="text-sm text-gray-600 font-medium">Discover blogs with advanced AI-powered retrieval</p>
+            </div>
         </header>
 
-        <div class="search-section">
-            <div class="search-bar">
-                <input
-                    type="text"
-                    id="searchInput"
-                    placeholder="Enter your search query..."
-                    autofocus
-                >
-                <button id="searchButton">Search</button>
+        <!-- Search Section -->
+        <div class="bg-white py-8 px-8 border-b border-gray-200">
+            <div class="max-w-7xl mx-auto">
+                <div class="max-w-2xl flex gap-3">
+                    <input
+                        type="text"
+                        id="searchInput"
+                        placeholder="Search for blogs..."
+                        autofocus
+                        class="flex-1 px-5 py-3 border border-gray-300 rounded-full text-base shadow-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all"
+                    >
+                    <button
+                        id="searchButton"
+                        class="px-8 py-3 bg-blue-500 text-white rounded-full text-sm font-medium hover:bg-blue-600 active:bg-blue-700 transition-colors shadow-sm hover:shadow-md"
+                    >
+                        Search
+                    </button>
+                </div>
             </div>
         </div>
 
-        <div id="loadingSpinner" class="loading-spinner" style="display: none;">
-            <div class="spinner"></div>
-            <p>Searching...</p>
-        </div>
-
-        <div id="resultsContainer" class="results-container" style="display: none;">
-            <div class="results-header">
-                <h2 id="resultsTitle">Search Results</h2>
-                <div id="resultsInfo" class="results-info"></div>
+        <!-- Loading Spinner -->
+        <div id="loadingSpinner" class="py-16 px-8" style="display: none;">
+            <div class="max-w-7xl mx-auto">
+                <div class="max-w-2xl">
+                    <div class="spinner mb-5"></div>
+                    <p class="text-gray-600 text-sm">Searching...</p>
+                </div>
             </div>
-            <div id="resultsList" class="results-list"></div>
         </div>
 
-        <div id="errorMessage" class="error-message" style="display: none;"></div>
+        <!-- Results Container -->
+        <div id="resultsContainer" class="py-5 px-8" style="display: none;">
+            <div class="max-w-7xl mx-auto">
+                <div class="max-w-2xl">
+                    <!-- Results Header -->
+                    <div class="mb-5">
+                        <h2 id="resultsTitle" class="text-xl font-normal text-gray-800 mb-2"></h2>
+                        <div id="resultsInfo" class="text-sm text-gray-600"></div>
+                    </div>
+
+                    <!-- Results List -->
+                    <div id="resultsList" class="flex flex-col"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Error Message -->
+        <div class="py-5 px-8" id="errorMessageWrapper" style="display: none;">
+            <div class="max-w-7xl mx-auto">
+                <div class="max-w-2xl bg-red-50 border-l-4 border-red-500 text-red-700 p-4 rounded" id="errorMessage"></div>
+            </div>
+        </div>
     </div>
 
     <script src="script.js"></script>

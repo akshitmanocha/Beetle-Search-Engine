@@ -11,6 +11,7 @@ const resultsTitle = document.getElementById('resultsTitle');
 const resultsInfo = document.getElementById('resultsInfo');
 const resultsList = document.getElementById('resultsList');
 const errorMessage = document.getElementById('errorMessage');
+const errorMessageWrapper = document.getElementById('errorMessageWrapper');
 
 // Search configuration from params.yaml
 let searchConfig = {
@@ -119,24 +120,21 @@ function displayResults(data) {
 // Create a result item element
 function createResultItem(result, number, hasReranking) {
     const item = document.createElement('div');
-    item.className = 'result-item';
+    item.className = 'py-4 border-b border-gray-200 last:border-b-0 hover:bg-gray-50 transition-colors';
 
     // Create clickable title with embedded link
     const titleLink = document.createElement('a');
-    titleLink.className = 'result-title-link';
+    titleLink.className = 'block text-xl font-normal text-blue-700 hover:underline mb-1 visited:text-purple-700';
     titleLink.href = result.url || '#';
     titleLink.target = '_blank';
-    titleLink.innerHTML = `
-        <span class="result-number">${number}</span>
-        ${escapeHtml(result.title || 'Untitled')}
-    `;
+    titleLink.textContent = result.title || 'Untitled';
 
     item.appendChild(titleLink);
 
     // Display score if available
     if (hasReranking && result.rerank_score !== undefined) {
         const score = document.createElement('span');
-        score.className = 'result-score';
+        score.className = 'inline-block bg-blue-50 text-blue-700 text-xs font-medium px-2.5 py-1 rounded-full mb-2';
         score.textContent = `Score: ${result.rerank_score.toFixed(4)}`;
         item.appendChild(score);
     }
@@ -145,7 +143,7 @@ function createResultItem(result, number, hasReranking) {
     const bodyContent = result.body_text || result.content || '';
     if (bodyContent) {
         const description = document.createElement('div');
-        description.className = 'result-description';
+        description.className = 'text-sm text-gray-700 leading-relaxed mt-1';
         const truncatedContent = bodyContent.substring(0, 350) + (bodyContent.length > 350 ? '...' : '');
         description.textContent = truncatedContent;
         item.appendChild(description);
@@ -157,16 +155,16 @@ function createResultItem(result, number, hasReranking) {
 // Show error message
 function showError(message) {
     errorMessage.textContent = message;
-    errorMessage.style.display = 'block';
+    errorMessageWrapper.style.display = 'block';
     setTimeout(() => {
-        errorMessage.style.display = 'none';
+        errorMessageWrapper.style.display = 'none';
     }, 5000);
 }
 
 // Hide all result containers
 function hideAll() {
     resultsContainer.style.display = 'none';
-    errorMessage.style.display = 'none';
+    errorMessageWrapper.style.display = 'none';
     loadingSpinner.style.display = 'none';
 }
 

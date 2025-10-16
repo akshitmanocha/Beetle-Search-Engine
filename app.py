@@ -8,7 +8,7 @@ import yaml
 
 from main import search_and_rerank
 
-app = FastAPI(title="Blog Search Engine")
+app = FastAPI(title="Beetle Search Engine")
 
 # Enable CORS for frontend
 app.add_middleware(
