@@ -3,10 +3,8 @@ import os
 from pathlib import Path
 import torch
 from transformers import AutoTokenizer, AutoModelForMaskedLM
-import numpy as np
 
-# Disable tokenizers parallelism to avoid multiprocessing issues
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 
 # --- Model and Tokenizer Loading ---
 # Proper device selection for macOS, CUDA, and CPU
@@ -41,7 +39,7 @@ def _generate_splade_vector(text: str) -> dict[int, float]:
     vec, _ = torch.max(torch.log(1 + torch.relu(logits)) * tokens.attention_mask.unsqueeze(-1), dim=1)
     
     # Filter out zero-weight terms and format
-    cols = vec.nonzero().squeeze().cpu().tolist()
+    cols = vec.squeeze().nonzero().squeeze().cpu().tolist()
     weights = vec[0, cols].cpu().tolist()
     
     if not isinstance(cols, list):
@@ -82,6 +80,12 @@ def main():
     project_root = Path(__file__).parent.parent.parent
     index_path = project_root / "data" / "splade_index" / "inverted_index.json"
     doc_map_path = project_root / "data" / "splade_index" / "doc_map.json"
+    metadata_path = project_root / "data" / "doc_metadata.json"
+
+    # Load metadata
+    print(f"Loading document metadata from {metadata_path}...")
+    with open(metadata_path, 'r') as f:
+        metadata = json.load(f)
 
     # --- Perform a search ---
     print("\n" + "="*20)
@@ -92,7 +96,12 @@ def main():
 
     print("\nTop search results:")
     for res in results:
-        print(f"  - Document ID: {res['id']}, Score: {res['score']:.4f}")
+        doc_id = res['id']
+        doc_info = metadata.get(doc_id)
+        if doc_info:
+            print(f"  - Title: {doc_info['title']}\n    Link: {doc_info['url']}\n    Score: {res['score']:.4f}")
+        else:
+            print(f"  - Document ID: {doc_id}, Score: {res['score']:.4f} (Metadata not found)")
 
 if __name__ == "__main__":
     main()

@@ -1,10 +1,10 @@
 ETL:
   downloader:
-    max_workers: 16
+    max_workers: 4
   crawler:
-    max_depth: 2
+    max_depth: 5
     sleep_time: 0
-    max_urls_per_seed: 1000
+    max_urls_per_seed: 5000
   parser:
     min_word_count: 100
   heuristic_labeling:
@@ -12,14 +12,13 @@ ETL:
 
 models:
   embedding:
-    model_name: Qwen/Qwen3-Embedding-0.6B
-    batch_size: 1
+    model_name: google/embeddinggemma-300m
+    batch_size: 32
     device: "cuda"
   reranker:
-    model_name: "ibm-granite/granite-embedding-reranker-english-r2"
-
+    model_name: Alibaba-NLP/gte-reranker-modernbert-base
 search:
-  method: "bm25"
-  top_k: 20
-  rerank_k: 20
-  reranker: false
+  method: "splade"
+  top_k: 10
+  rerank_k: 10
+  reranker: true

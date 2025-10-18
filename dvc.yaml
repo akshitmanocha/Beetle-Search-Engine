@@ -90,7 +90,7 @@ stages:
     cmd: python -m src.index.build_bm25
     deps:
     - src/index/build_bm25.py
-    - data/parsed
+    - data/clean
     outs:
     - data/bm25_index
 
@@ -98,6 +98,6 @@ stages:
     cmd: python -m src.index.build_splade
     deps:
     - src/index/build_splade.py
-    - data/parsed
+    - data/clean
     outs:
     - data/splade_index

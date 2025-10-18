@@ -59,6 +59,7 @@ def generate_embeddings(
         batch_size=batch_size,
         show_progress_bar=True,
         convert_to_numpy=True,
+        
     )
 
     # Create a mapping from doc_id to embedding
@@ -76,8 +77,6 @@ def save_embeddings(embedding_map: dict, output_path: Path):
 
 def main():
     """Main function to run the embedding generation process."""
-    # Disable tokenizers parallelism to avoid multiprocessing issues
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
     project_root = Path(__file__).parent.parent.parent
 
