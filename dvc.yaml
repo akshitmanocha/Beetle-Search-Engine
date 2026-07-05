@@ -1,5 +1,4 @@
 params:
-- ETL.downloader
 - ETL.crawler
 - ETL.parser
 - ETL.heuristic_labeling
@@ -17,34 +16,24 @@ stages:
     - ETL.crawler.sleep_time
     outs:
     - data/crawled_websites.txt
-
-  download:
-    cmd: python src/ETL/download_html.py
-    deps:
-    - src/ETL/download_html.py
-    - data/crawled_websites.txt
-    params:
-    - ETL.downloader.max_workers
-    outs:
     - data/raw
-    - data/metadata
 
   parse:
     cmd: python src/ETL/parse.py
     deps:
     - src/ETL/parse.py
+    - data/crawled_websites.txt
     - data/raw
-    - data/metadata
     params:
     - ETL.parser.min_word_count
     outs:
-    - data/parsed
+    - data/parsed.json
 
   label:
     cmd: python src/ETL/heuristic_label.py
     deps:
     - src/ETL/heuristic_label.py
-    - data/parsed
+    - data/parsed.json
     params:
     - ETL.heuristic_labeling.score_threshold
     outs:
@@ -63,8 +52,8 @@ stages:
     cmd: python src/ETL/filter_blogs.py
     deps:
     - src/ETL/filter_blogs.py
-    - data/labels/weak.csv
-    - data/parsed
+    - data/labels/strong.csv
+    - data/parsed.json
     outs:
     - data/clean
 

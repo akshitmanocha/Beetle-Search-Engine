@@ -75,7 +75,7 @@ def filter_blogs():
     # Validate inputs
     if not labels_path.exists():
         print(f"✗ Error: {labels_path} not found")
-        print(f"  Run the weak labeler first: dvc repro label")
+        print(f"  Run the labeling stages first: dvc repro train_tfidf")
         return
 
     if not parsed_file.exists():

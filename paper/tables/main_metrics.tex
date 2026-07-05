@@ -1,0 +1,16 @@
+\begin{tabular}{llccccc}
+\toprule
+System & Dataset & nDCG@10 & MRR@10 & Recall@100 & Latency (ms) & Rerank calls \\
+\midrule
+bm25 & scifact & 0.6461 & 0.6115 & 0.9003 & 80.3 & 0 \\
+dense & scifact & 0.7299 & 0.6980 & 0.9033 & 30.6 & 0 \\
+splade & scifact & 0.7079 & 0.6788 & 0.9487 & 49.0 & 0 \\
+hybrid & scifact & 0.6978 & 0.6691 & 0.9767 & 159.9 & 0 \\
+hybrid+rerank & scifact & 0.7663 & 0.7312 & 0.9767 & 2192.2 & 15000 \\
+bm25 & nfcorpus & 0.3120 & 0.5192 & 0.2434 & 10.0 & 0 \\
+dense & nfcorpus & 0.3868 & 0.5990 & 0.3505 & 23.4 & 0 \\
+splade & nfcorpus & 0.3549 & 0.5717 & 0.2891 & 38.8 & 0 \\
+hybrid & nfcorpus & 0.3675 & 0.5953 & 0.3521 & 75.7 & 0 \\
+hybrid+rerank & nfcorpus & 0.3660 & 0.5791 & 0.3521 & 2102.5 & 16150 \\
+\bottomrule
+\end{tabular}

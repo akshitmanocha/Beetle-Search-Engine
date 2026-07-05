@@ -1,9 +1,12 @@
-// API endpoint
-const API_URL = 'http://localhost:8000';
+// API endpoint. Empty string => same-origin (the container serves UI + API
+// from one FastAPI app), so the demo works both locally and when deployed.
+const API_URL = '';
 
 // DOM elements
 const searchInput = document.getElementById('searchInput');
 const searchButton = document.getElementById('searchButton');
+const methodSelect = document.getElementById('methodSelect');
+const rerankerToggle = document.getElementById('rerankerToggle');
 
 const loadingSpinner = document.getElementById('loadingSpinner');
 const resultsContainer = document.getElementById('resultsContainer');
@@ -34,6 +37,9 @@ async function loadConfig() {
                 searchConfig.reranker = config.search.reranker || false;
                 console.log('Loaded search configuration:', searchConfig);
             }
+            // Reflect defaults into the UI controls.
+            if (methodSelect) methodSelect.value = searchConfig.method;
+            if (rerankerToggle) rerankerToggle.checked = searchConfig.reranker;
         }
     } catch (error) {
         console.log('Could not load config, using defaults');
@@ -55,12 +61,16 @@ async function performSearch() {
     // Show loading spinner
     loadingSpinner.style.display = 'block';
 
+    // Read the live UI controls, falling back to the loaded config defaults.
+    const method = methodSelect ? methodSelect.value : searchConfig.method;
+    const rerankerEnabled = rerankerToggle ? rerankerToggle.checked : searchConfig.reranker;
+
     const requestBody = {
         query: query,
         top_k: searchConfig.top_k,
         rerank_k: searchConfig.rerank_k,
-        search_method: searchConfig.method,
-        reranker_enabled: searchConfig.reranker
+        search_method: method,
+        reranker_enabled: rerankerEnabled
     };
 
     try {
@@ -131,21 +141,21 @@ function createResultItem(result, number, hasReranking) {
 
     item.appendChild(titleLink);
 
-    // Display score if available
-    if (hasReranking && result.rerank_score !== undefined) {
+    // Display the (typed-contract) score.
+    if (result.score !== undefined && result.score !== null) {
         const score = document.createElement('span');
         score.className = 'inline-block bg-blue-50 text-blue-700 text-xs font-medium px-2.5 py-1 rounded-full mb-2';
-        score.textContent = `Score: ${result.rerank_score.toFixed(4)}`;
+        const label = hasReranking ? 'Rerank score' : 'Score';
+        score.textContent = `${label}: ${Number(result.score).toFixed(4)}`;
         item.appendChild(score);
     }
 
-    // Display body content preview
-    const bodyContent = result.body_text || result.content || '';
-    if (bodyContent) {
+    // Display the snippet from the typed contract.
+    const snippet = result.snippet || '';
+    if (snippet) {
         const description = document.createElement('div');
         description.className = 'text-sm text-gray-700 leading-relaxed mt-1';
-        const truncatedContent = bodyContent.substring(0, 350) + (bodyContent.length > 350 ? '...' : '');
-        description.textContent = truncatedContent;
+        description.textContent = snippet;
         item.appendChild(description);
     }
 

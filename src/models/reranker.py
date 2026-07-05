@@ -1,69 +1,37 @@
-from sentence_transformers import CrossEncoder
-import numpy as np
+def rerank(query: str, candidates, registry, max_chars: int = 2000):
+    """Re-rank ``candidates`` with the registry's cross-encoder (task 4.1).
 
-class Reranker:
-    def __init__(self, model_name: str, device: str = 'cpu'):
-        self.model = CrossEncoder(model_name, device=device)
+    Uses the startup-loaded reranker (no per-request instantiation — fixes S2),
+    concatenates ``title + " " + text`` and truncates to ``max_chars`` before
+    scoring (fixes R7), and returns candidates re-sorted by cross-encoder score
+    descending WITHOUT mutating the input ``candidates`` list.
 
-    def rerank(self, query: str, documents: list[dict]) -> list[dict]:
-        """
-        Reranks a list of documents based on a query.
+    Args:
+        query: the search query.
+        candidates: list of ``(doc_id, score)`` pairs to re-rank.
+        registry: a built Registry whose ``corpus`` contains the candidate docs.
+        max_chars: max characters of concatenated title+text fed to the model.
 
-        Args:
-            query: The query string.
-            documents: A list of documents to be reranked. Each document is a dictionary
-                       that should contain 'title' and 'body_text' keys.
+    Returns:
+        A new list of ``(doc_id, rerank_score)`` sorted by score descending.
+    """
+    if not candidates:
+        return []
 
-        Returns:
-            A list of reranked documents, sorted by their new scores.
-        """
-        # Create pairs of [query, document_text]
-        pairs = []
-        for doc in documents:
-            text = doc.get('title', '') + " " + doc.get('body_text', '')
-            pairs.append([query, text])
+    doc_ids = [doc_id for doc_id, _ in candidates]
+    pairs = []
+    for doc_id in doc_ids:
+        doc = registry.corpus.get(doc_id, {})
+        title = doc.get("title", "") or ""
+        text = doc.get("text", doc.get("body_text", "")) or ""
+        combined = f"{title} {text}"[:max_chars]
+        pairs.append((query, combined))
 
-        # Predict the scores
-        scores = self.model.predict(pairs, show_progress_bar=False)
-
-        # Add scores to documents and sort
-        for doc, score in zip(documents, scores):
-            doc['rerank_score'] = score
-        
-        reranked_docs = sorted(documents, key=lambda x: x['rerank_score'], reverse=True)
-        return reranked_docs
-
-if __name__ == '__main__':
-    from pathlib import Path
-    import json
-    import torch
-
-    # Proper device selection
-    if torch.cuda.is_available():
-        device = 'cuda'
-    elif torch.backends.mps.is_available():
-        device = 'mps'
-    else:
-        device = 'cpu'
-    
-    print(f"Using device: {device}")
-
-    # More realistic example usage
-    reranker = Reranker('cross-encoder/ms-marco-MiniLM-L-6-v2', device=device)
-
-    project_root = Path(__file__).parent.parent.parent
-    documents_path = project_root / "data" / "clean" / "blogs.json"
-
-    with open(documents_path, 'r') as f:
-        all_documents = json.load(f)
-    
-    sample_docs = all_documents[:5]
-
-    sample_query = "transformer models for NLP"
-
-    reranked_results = reranker.rerank(sample_query, sample_docs)
-
-    print(f"Query: {sample_query}\n")
-    print("Reranked documents:")
-    for doc in reranked_results:
-        print(f"  - ID: {doc['id']}, Score: {doc['rerank_score']:.4f}, Title: {doc['title']}")
+    scores = registry.reranker.predict(pairs, show_progress_bar=False)
+    # Build a NEW list; do not mutate the caller's `candidates`.
+    reranked = sorted(
+        zip(doc_ids, (float(s) for s in scores)),
+        key=lambda kv: kv[1],
+        reverse=True,
+    )
+    return reranked

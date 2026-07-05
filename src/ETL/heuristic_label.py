@@ -5,57 +5,9 @@ Weak Labeling Script - Generate heuristic-based labels for blog classification.
 
 import csv
 import json
-import re
 from typing import Tuple
-from urllib.parse import urlparse
 import yaml
 from pathlib import Path
-
-def score_url_patterns(url: str) -> tuple[int, str]:
-    """
-    Score URL based on common blog patterns using regex.
-    Returns (delta_score, reason).
-    """
-    score = 0
-    reasons = []
-
-    parsed = urlparse(url)
-    path = parsed.path.lower()
-
-    # Negative indicators (not blogs)
-    non_blog_patterns = [
-        (r'/docs?/', -8, 'documentation'),
-        (r'/api/', -8, 'API docs'),
-        (r'/documentation/', -8, 'documentation'),
-        (r'/reference/', -6, 'reference docs'),
-        (r'/product[s]?/', -5, 'product page'),
-        (r'/pricing/', -8, 'pricing page'),
-        (r'/feature[s]?/', -5, 'features page'),
-        (r'/about/', -8, 'about page'),
-        (r'/contact/', -8, 'contact page'),
-        (r'/terms/', -8, 'terms page'),
-        (r'/privacy/', -8, 'privacy page'),
-        (r'/author[s]?/', -6, 'author listing'),
-        (r'/tag[s]?/', -5, 'tag page'),
-        (r'/categor(y|ies)/', -5, 'category page'),
-        (r'/archive[s]?/', -4, 'archive page'),
-        (r'/search/', -6, 'search page'),
-    ]
-
-    # Check for non-blog patterns
-    for pattern, points, reason in non_blog_patterns:
-        if re.search(pattern, path):
-            score += points
-            reasons.append(f'{points} {reason}')
-            break  # Only count the first matching negative pattern
-
-    # Base URL or homepage (no meaningful path)
-    if not path or path == '/' or path.strip('/') == '':
-        score -= 8
-        reasons.append('-8 base URL')
-
-    reason_str = '; '.join(reasons) if reasons else 'neutral URL pattern'
-    return score, reason_str
 
 
 def calculate_blog_score(data: dict) -> Tuple[int, str]:
@@ -87,7 +39,7 @@ def calculate_blog_score(data: dict) -> Tuple[int, str]:
     word_count = data.get("word_count", 0)
     if word_count < 300:
         score -= 20
-        reasons.append(f"-3 too short ({word_count} words)")
+        reasons.append(f"-20 too short ({word_count} words)")
 
     # 4. arXiv citations (positive for technical blogs)
     if data.get("has_arxiv_citation") or data.get("has_references_section"):
@@ -98,7 +50,7 @@ def calculate_blog_score(data: dict) -> Tuple[int, str]:
     code_blocks = data.get("code_blocks_count", 0)
     if code_blocks > 0:
         score += 3
-        reasons.append(f"+2 has code blocks ({code_blocks})")
+        reasons.append(f"+3 has code blocks ({code_blocks})")
 
     reasons = [r for r in reasons if r]  # Remove empty strings
     if not reasons:
@@ -184,7 +136,7 @@ def generate_weak_labels(parsed_file: Path, weak_labels_file: Path, score_thresh
 
     # Print statistics
     if len(results) == 0:
-        print(f"\n✗ No files processed. Make sure data/parsed/ contains JSON files.")
+        print(f"\n✗ No documents processed. Make sure {parsed_file} is non-empty.")
         return
 
     blog_count = sum(1 for r in results if r["label"] == "blog")

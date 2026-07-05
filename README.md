@@ -1,20 +1,39 @@
 # Beetle Search Engine
 
-Beetle is a search engine for high-quality AI research blog posts, designed to filter out low-quality, SEO-farmed content. It uses a combination of classic and modern retrieval techniques to provide relevant and technical blog posts for AI researchers and engineers.
+Beetle is a hybrid search engine over high-quality AI/ML content. It composes
+retrieval families — lexical (BM25), dense (FAISS, cosine), and learned-sparse
+(SPLADE) — fused with weighted Reciprocal
+Rank Fusion, with an optional cross-encoder reranker. Alongside the serving path it
+ships a **reproducible evaluation harness** that measures every component on small
+public BEIR benchmarks (SciFact and NFCorpus) — so retrieval-quality claims are
+backed by numbers, not folklore.
+
+It runs end-to-end on a single laptop (Apple M4 Pro, MPS/CPU; no external GPU).
 
 ## Features
 
-- **Hybrid Search:** Combines BM25 and FAISS for efficient and accurate retrieval.
-- **Two-Stage Filtering:** Uses a TF-IDF + Logistic Regression model for initial filtering and a Transformer-based model for fine-grained classification.
-- **FastAPI Backend:** A modern, fast (high-performance) web framework for building APIs.
-- **DVC Pipeline:** A DVC-managed pipeline for crawling, parsing, and extracting features from web pages.
-- **Containerized:** Can be deployed using Docker and Kubernetes.
+- **Hybrid search:** weighted RRF over BM25 + dense (cosine) + SPLADE.
+- **Cross-encoder reranking:** loaded once at start-up, with input truncation.
+- **Evaluation harness:** nDCG@10 / MRR@10 / Recall@100 over BEIR datasets, a
+  five-system ablation, a fusion-weight sweep, and a cosine-vs-L2 comparison;
+  emits CSV tables and Pareto / bar-chart figures.
+- **Production-shaped FastAPI backend:** start-up model/index registry,
+  `/healthz` + `/readyz`, tightened CORS, structured logging, a typed result
+  contract.
+- **Tested:** pytest unit + integration tests and Hypothesis property tests for
+  the eight core correctness properties (RRF, cosine, metrics, determinism).
+- **Reproducible:** pinned dependencies + a DVC pipeline; containerized demo.
+
+> **Research write-up.** A short LaTeX paper (`paper/beetle.tex`) presents the
+> system and the ablation, with tables and figures sourced directly from the
+> evaluation outputs. See [plan.md](plan.md) for the sprint scope and the
+> demoted research roadmap (QARR / CR-CEE / LDDE).
 
 ## Architecture
 
 The project is composed of the following components:
 
-- **ETL Pipeline:** A DVC-managed pipeline that crawls websites, downloads HTML, parses the content, and generates labels for training.
+- **ETL Pipeline:** A DVC-managed pipeline that crawls websites (saving HTML as it goes), parses the content, and generates labels for training.
 - **Indexing:** Builds BM25, FAISS, and SPLADE indexes for fast retrieval.
 - **Models:** Includes models for embedding, reranking, and classification.
 - **Serving:** A FastAPI application that exposes a search API.
@@ -50,36 +69,59 @@ After the initial retrieval, a more powerful Transformer-based model can be used
 
 ### Prerequisites
 
-- Python 3.8+
-- [Poetry](https://python-poetry.org/) for dependency management
-- [DVC](https://dvc.org/) for data versioning
+- Python 3.9+ (tested on 3.9; the container uses 3.11). All pinned dependencies
+  install with prebuilt wheels on Apple Silicon / CPU — no external GPU needed.
+- A Hugging Face token with access to `google/embeddinggemma-300m` (the dense
+  embedder is gated). Set it via `huggingface-cli login` or `export HF_TOKEN=...`.
+- [DVC](https://dvc.org/) (optional) for the data pipeline.
 
 ### Installation
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/your-username/Deep-Blog-Search.git
-   cd Deep-Blog-Search
+   git clone https://github.com/your-username/Beetle-Search-Engine.git
+   cd Beetle-Search-Engine
    ```
 
-2. **Install dependencies:**
+2. **Create a virtual environment and install dependencies (pinned):**
    ```bash
+   python -m venv .venv && source .venv/bin/activate
    pip install -r requirements.txt
    ```
 
-3. **Pull the data and models:**
+### Running the evaluation harness
+
+```bash
+# Five-system ablation on the default BEIR datasets (downloads them).
+python -c "from eval.ablation import run_ablation; run_ablation(['scifact','nfcorpus'])"
+# Generate figures + LaTeX tables from the results.
+python eval/figures.py && python eval/make_tables.py
+```
+
+Results land in `eval/results/*.csv`, figures in `eval/figures/`, and LaTeX
+fragments in `paper/tables/`.
+
+### Running the demo (local)
+
+1. **Build the demo index** (BEIR corpus → on-disk artifacts; needs the HF token):
    ```bash
-   dvc pull
+   HF_TOKEN=... python scripts/prepare_demo_index.py --dataset scifact
    ```
 
-### Running the Application
-
-1. **Start the FastAPI server:**
+2. **Start the server:**
    ```bash
    uvicorn app:app --host 0.0.0.0 --port 8000
    ```
 
-2. **Open your browser and navigate to `http://localhost:8000`**
+3. **Open `http://localhost:8000`** and try the method selector (BM25 / dense /
+   SPLADE / hybrid) and the reranker toggle.
+
+### Running the tests
+
+```bash
+pytest -m "not integration"   # fast unit + property tests (no model downloads)
+pytest -m integration         # slow: loads real models, builds real indexes
+```
 
 ## Usage
 
@@ -89,44 +131,52 @@ The frontend is located in the `static` directory and can be accessed by navigat
 
 ### Docker Usage
 
-To run the application with Docker, you can use Docker Compose.
+The container serves the UI **and** the API from one FastAPI app and bakes the
+small demo index in, so it is self-contained. Build the index on the host first
+(it needs your HF token, which is intentionally **not** baked into the image):
 
-1. **Pull DVC data:**
-   ```bash
-   dvc pull
-   ```
+```bash
+HF_TOKEN=... python scripts/prepare_demo_index.py --dataset scifact
+docker compose up --build
+```
 
-2. **Build and run with Docker Compose:**
-   ```bash
-   docker-compose up --build
-   ```
-
-This will build the Docker image and start the service. You can then access the application at `http://localhost:8000`.
+Then open `http://localhost:8000`. The platform health probe is `/healthz`.
+The recommended free-tier deploy target is **Hugging Face Spaces** (Docker);
+set `BEETLE_CORS_ORIGINS` to the Space's origin.
 
 ## Project Structure
 
 ```
-├── app.py                  # FastAPI application
+├── app.py                  # FastAPI application (registry, /healthz, typed /search)
 ├── dvc.yaml                # DVC pipeline definition
-├── params.yaml             # Parameters for the DVC pipeline
-├── requirements.txt        # Python dependencies
+├── params.yaml             # Parameters (models, search, ETL)
+├── requirements.txt        # Pinned Python dependencies
 ├── src                     # Source code
+│   ├── config.py           # Centralized config: paths, params, device (singleton)
 │   ├── ETL                 # ETL pipeline scripts
-│   ├── index               # Indexing scripts
-│   ├── models              # Model training and embedding scripts
-│   ├── search              # Search and retrieval scripts
-│   └── serving             # Serving scripts
-├── static                  # Frontend files
-└── data                    # Data (managed by DVC)
+│   ├── index               # Index builders (FAISS cosine + L2, SPLADE)
+│   ├── models              # Embedding + reranker
+│   ├── search              # Retrievers (bm25/faiss/splade) + weighted RRF hybrid
+│   └── serving             # Registry + typed contracts
+├── eval                    # Evaluation harness
+│   ├── metrics.py          # nDCG@10 / MRR@10 / Recall@100
+│   ├── datasets.py         # BEIR loaders
+│   ├── ablation.py         # 5-system ablation, weight sweep, cosine-vs-L2
+│   ├── figures.py          # Pareto + per-dataset bar charts
+│   └── make_tables.py      # LaTeX table fragments from results CSVs
+├── paper                   # LaTeX research paper (beetle.tex, tables/, figures/)
+├── scripts                 # prepare_demo_index.py (BEIR → demo artifacts)
+├── tests                   # pytest unit + property + integration tests
+├── static                  # Frontend (method selector + reranker toggle)
+└── data                    # Indexes + corpus (BEIR cache, demo index)
 ```
 
 ## DVC Pipeline
 
 The `dvc.yaml` file defines the data pipeline. The main stages are:
 
-- `crawl`: Crawls websites from a seed list.
-- `download`: Downloads the HTML content of the crawled websites.
-- `parse`: Parses the HTML to extract the main content.
+- `crawl`: Crawls websites from a seed list, saving each page's HTML in one pass.
+- `parse`: Parses the saved HTML to extract the main content.
 - `label`: Generates weak labels for the parsed content.
 - `train_tfidf`: Trains a TF-IDF model to generate strong labels.
 - `filter`: Filters the blogs based on the generated labels.

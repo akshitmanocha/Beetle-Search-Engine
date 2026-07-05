@@ -1,94 +1,92 @@
+#!/usr/bin/env python3
+"""Crawl seed domains breadth-first and save each page's HTML in one pass.
+
+Single-fetch: the HTML fetched to extract links is the HTML we keep, so there is
+no separate download stage. Outputs match what the parser expects:
+  data/crawled_websites.txt   one URL per line
+  data/raw/<sha256(url)>.html  the page HTML
+"""
+
 import argparse
+import hashlib
 import time
 from collections import deque
-from urllib.parse import urljoin, urlparse
-import yaml
 from pathlib import Path
+from urllib.parse import urldefrag, urljoin, urlparse
 
 import requests
+import yaml
 from bs4 import BeautifulSoup
-from w3lib.url import canonicalize_url
 
 HEADERS = {"User-Agent": "Educational-Crawler/1.0"}
 
 
-def same_domain(u1, u2):
-    return urlparse(u1).netloc.lower() == urlparse(u2).netloc.lower()
+def sha_name(url: str) -> str:
+    return hashlib.sha256(url.encode("utf-8")).hexdigest()
 
 
-def crawl(seed, out_path, max_urls, max_depth, sleep_time):
+def crawl(seed, urls_file, raw_dir, max_urls, max_depth, sleep_time):
     seed = seed if seed.startswith("http") else f"https://{seed}"
-    base = urlparse(seed).netloc.lower()
-    visited, q = set(), deque([(seed, 0)])
-    crawled_count = 0
+    domain = urlparse(seed).netloc.lower()
+    visited, queue, count = set(), deque([(seed, 0)]), 0
 
-    with open(out_path, "a") as out:
-        while q:
-            if max_urls and crawled_count >= max_urls:
-                break
-
-            url, depth = q.popleft()
-            if depth > max_depth or url in visited:
+    with open(urls_file, "a", encoding="utf-8") as urls_out:
+        while queue and (not max_urls or count < max_urls):
+            url, depth = queue.popleft()
+            if url in visited or depth > max_depth:
                 continue
             visited.add(url)
 
             try:
                 r = requests.get(url, headers=HEADERS, timeout=10)
-                if r.status_code != 200 or "text/html" not in r.headers.get(
-                    "Content-Type", ""
-                ):
-                    continue
-
-                out.write(url + "\n")
-                out.flush()
-                crawled_count += 1
-                print(f"Crawled {crawled_count}: {url}")
-
-                soup = BeautifulSoup(r.text, "html.parser")
-                for a in soup.find_all("a", href=True):
-                    try:
-                        abs_url = canonicalize_url(urljoin(url, a["href"]))
-                        if same_domain(abs_url, seed) and abs_url not in visited:
-                            q.append((abs_url, depth + 1))
-                    except ValueError:
-                        continue
-                time.sleep(sleep_time)
             except Exception:
                 print(f"Failed to crawl {url}")
                 continue
+            if r.status_code != 200 or "text/html" not in r.headers.get("Content-Type", ""):
+                continue
+
+            # Save the HTML we just fetched (no second download pass).
+            (raw_dir / f"{sha_name(url)}.html").write_text(r.text, encoding="utf-8")
+            urls_out.write(url + "\n")
+            urls_out.flush()
+            count += 1
+            print(f"Crawled {count}: {url}")
+
+            soup = BeautifulSoup(r.text, "html.parser")
+            for a in soup.find_all("a", href=True):
+                link, _ = urldefrag(urljoin(url, a["href"]))
+                if urlparse(link).netloc.lower() == domain and link not in visited:
+                    queue.append((link, depth + 1))
+
+            time.sleep(sleep_time)
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description="Crawl websites from seed domains")
-    parser.add_argument(
-        "--limit",
-        type=int,
-        help="Maximum number of URLs to crawl per seed",
-    )
+    parser.add_argument("--limit", type=int, help="Max URLs to crawl per seed")
     args = parser.parse_args()
 
-    with open("params.yaml", "r") as f:
-        params = yaml.safe_load(f)
-        crawler_params = params['ETL']['crawler']
-
-    # Correctly define project_root and other paths
     project_root = Path(__file__).parent.parent.parent
-    seed_domains_file = project_root / "data" / "seeds" / "seed_domains.txt"
-    crawled_urls_file = project_root / "data" / "crawled_websites.txt"
+    with open(project_root / "params.yaml") as f:
+        cfg = yaml.safe_load(f)["ETL"]["crawler"]
 
-    with open(seed_domains_file, "r") as f:
-        seeds = [line.strip() for line in f if line.strip()]
+    seeds_file = project_root / "data" / "seeds" / "seed_domains.txt"
+    urls_file = project_root / "data" / "crawled_websites.txt"
+    raw_dir = project_root / "data" / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
 
-    # Clear the crawled URLs file before starting
-    with open(crawled_urls_file, "w") as f:
-        pass
+    seeds = [s.strip() for s in seeds_file.read_text().splitlines() if s.strip()]
+    urls_file.write_text("")  # reset before a fresh crawl
 
     for seed in seeds:
         print(f"\nCrawling {seed}...")
         crawl(
-            seed,
-            crawled_urls_file,
-            max_urls=args.limit or crawler_params['max_urls_per_seed'],
-            max_depth=crawler_params['max_depth'],
-            sleep_time=crawler_params['sleep_time'],
+            seed, urls_file, raw_dir,
+            max_urls=args.limit or cfg["max_urls_per_seed"],
+            max_depth=cfg["max_depth"],
+            sleep_time=cfg["sleep_time"],
         )
+
+
+if __name__ == "__main__":
+    main()

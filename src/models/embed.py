@@ -4,7 +4,6 @@ Generate sentence embeddings for blog posts using a SentenceTransformer model.
 """
 
 import json
-import os
 import pickle
 from pathlib import Path
 

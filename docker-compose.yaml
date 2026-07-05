@@ -1,16 +1,20 @@
-version: '3.8'
-
 services:
-  blog-search:
+  beetle-search:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: blog-search-engine
+    container_name: beetle-search-engine
     ports:
       - "8000:8000"
-    volumes:
-      - ./data:/app/data
     environment:
       - PYTHONUNBUFFERED=1
+      - TOKENIZERS_PARALLELISM=false
+      # Restrict CORS to the deployed frontend origin(s) in production.
+      - BEETLE_CORS_ORIGINS=${BEETLE_CORS_ORIGINS:-http://localhost:8000}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 5
     restart: unless-stopped
-    command: python app.py

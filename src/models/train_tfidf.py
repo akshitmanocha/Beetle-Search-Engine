@@ -1,45 +1,47 @@
-import pandas as pd
-import joblib
-from pathlib import Path
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report
-import re
-import nltk
-from nltk.corpus import stopwords
-from nltk.stem import WordNetLemmatizer
+"""Self-training stage: refine the heuristic weak labels with a TF-IDF + LogReg
+classifier, writing the refined ``strong.csv`` consumed by the filter stage."""
 
-# Download NLTK data if not present
-try:
-    stopwords.words('english')
-except LookupError:
-    nltk.download('stopwords')
-try:
-    nltk.data.find('corpora/wordnet')
-except LookupError:
-    nltk.download('wordnet')
+import re
+from pathlib import Path
+
+import pandas as pd
+
+
+def _ensure_nltk():
+    """Download the NLTK corpora the preprocessor needs (lazy, not at import)."""
+    import nltk
+    for resource, path in [("stopwords", "corpora/stopwords"), ("wordnet", "corpora/wordnet")]:
+        try:
+            nltk.data.find(path)
+        except LookupError:
+            nltk.download(resource)
 
 
 def preprocess_text(text: str) -> str:
-    """Basic text preprocessing for TF-IDF."""
-    # Lowercase
-    text = text.lower()
-    # Remove punctuation
-    text = re.sub(r'[^\w\s]', '', text)
-    # Lemmatize and remove stopwords
+    """Lowercase, strip punctuation, lemmatize, and drop stopwords for TF-IDF."""
+    from nltk.corpus import stopwords
+    from nltk.stem import WordNetLemmatizer
+
+    text = re.sub(r'[^\w\s]', '', text.lower())
     lemmatizer = WordNetLemmatizer()
     stop_words = set(stopwords.words('english'))
-    tokens = [lemmatizer.lemmatize(word) for word in text.split() if word not in stop_words]
-    return ' '.join(tokens)
+    return ' '.join(
+        lemmatizer.lemmatize(word) for word in text.split() if word not in stop_words
+    )
 
 def train_and_predict(project_root: Path):
-    """Trains a TF-IDF model and saves predictions."""
-    
+    """Train a TF-IDF + LogReg classifier on the weak labels and write refined ones."""
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.metrics import classification_report
+    from sklearn.model_selection import train_test_split
+
+    _ensure_nltk()
+
     # Load and merge data
     labels_path = project_root / "data" / "labels" / "weak.csv"
     parsed_data_path = project_root / "data" / "parsed.json"
-    
+
     df_labels = pd.read_csv(labels_path)
     df_parsed = pd.read_json(parsed_data_path)
     

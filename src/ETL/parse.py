@@ -159,9 +159,10 @@ def parse_html_file(html_path: str, url: str, min_word_count: int) -> dict:
     soup = BeautifulSoup(html, "html.parser")
 
     # Extract content - only use trafilatura if it extracted substantial content
+    # (at least the configured min_word_count; otherwise fall back to readability).
     if trafilatura_data and trafilatura_data["text"]:
         word_count = len(trafilatura_data["text"].split())
-        if word_count >= 50:
+        if word_count >= min_word_count:
             # Trafilatura extracted good content
             title = trafilatura_data["title"] or "Untitled"
             body_text = trafilatura_data["text"]

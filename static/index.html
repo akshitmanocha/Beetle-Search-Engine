@@ -60,6 +60,26 @@
                         Search
                     </button>
                 </div>
+
+                <!-- Retrieval method + reranker controls (task 12.1) -->
+                <div class="max-w-2xl mt-4 flex flex-wrap items-center gap-4">
+                    <label class="flex items-center gap-2 text-sm text-gray-700">
+                        <span class="font-medium">Method:</span>
+                        <select
+                            id="methodSelect"
+                            class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:border-blue-500"
+                        >
+                            <option value="hybrid">Hybrid (BM25 + Dense + SPLADE)</option>
+                            <option value="bm25">BM25 (lexical)</option>
+                            <option value="dense">Dense (FAISS cosine)</option>
+                            <option value="splade">SPLADE (learned sparse)</option>
+                        </select>
+                    </label>
+                    <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                        <input type="checkbox" id="rerankerToggle" class="w-4 h-4 accent-blue-500">
+                        <span class="font-medium">Rerank (cross-encoder)</span>
+                    </label>
+                </div>
             </div>
         </div>
 

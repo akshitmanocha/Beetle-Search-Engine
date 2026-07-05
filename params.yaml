@@ -1,6 +1,4 @@
 ETL:
-  downloader:
-    max_workers: 4
   crawler:
     max_depth: 5
     sleep_time: 0
@@ -14,9 +12,11 @@ models:
   embedding:
     model_name: google/embeddinggemma-300m
     batch_size: 32
-    device: "cuda"
+    # device is resolved at runtime by src/config.py (mps > cuda > cpu); not set here.
   reranker:
     model_name: Alibaba-NLP/gte-reranker-modernbert-base
+  splade:
+    model_name: naver/splade-cocondenser-ensembledistil
 search:
   method: "splade"
   top_k: 10
